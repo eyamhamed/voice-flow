@@ -8,6 +8,7 @@ import { getChatGptAnswer } from './callUtil';
 import { CallHistoryType } from './CallHistory';
 
 export interface MessageType {
+  id: string;
   message: string;
   sender: string;
 }
