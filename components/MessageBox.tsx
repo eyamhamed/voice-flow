@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, MessageSquare, Volume2, Copy } from 'lucide-react';
 
 interface MessageBoxProps {
-  message: string;
+  message: string | { role: string; content: string; refusal: null; annotations: any[] };
   className?: string;
   darkMode?: boolean;
 }
@@ -18,23 +18,36 @@ export default function MessageBox({
   const [showActions, setShowActions] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   
+  // Extract message content if it's in an object format
+  const getMessageContent = (): string => {
+    if (!message) return '';
+    if (typeof message === 'string') return message;
+    if (typeof message === 'object' && 'content' in message) return message.content;
+    return '';
+  };
+  
   // Simulate typing effect
   useEffect(() => {
-    if (!message) {
+    const messageContent = getMessageContent();
+    
+    if (!messageContent) {
       setIsTyping(false);
       setDisplayedText('How can I assist you today?');
       return;
     }
     
+    // Reset state for new message
     setIsTyping(true);
     setDisplayedText('');
     
     const typingSpeed = 15; // ms per character
     let currentIndex = 0;
+    const textContent = messageContent.trim();
     
     const typingInterval = setInterval(() => {
-      if (currentIndex < message.length) {
-        setDisplayedText(prev => prev + message[currentIndex]);
+      if (currentIndex < textContent.length) {
+        const char = textContent.charAt(currentIndex);
+        setDisplayedText(prev => prev + char);
         currentIndex++;
       } else {
         clearInterval(typingInterval);
@@ -54,14 +67,16 @@ export default function MessageBox({
 
   // Copy message to clipboard
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(displayedText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (displayedText) {
+      navigator.clipboard.writeText(displayedText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
   
   // Read message aloud
   const readMessage = () => {
-    if ('speechSynthesis' in window) {
+    if ('speechSynthesis' in window && displayedText) {
       const utterance = new SpeechSynthesisUtterance(displayedText);
       window.speechSynthesis.speak(utterance);
     }
@@ -83,7 +98,7 @@ export default function MessageBox({
       <div className="flex items-center mb-3">
         <div className={`flex items-center ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
           <MessageSquare className="h-4 w-4 mr-2" />
-          <span className="text-sm font-medium">Bob</span>
+          <span className="text-sm font-medium">VoiceFlow</span>
         </div>
         
         <div className={`ml-auto transition-opacity duration-200 ${showActions ? 'opacity-100' : 'opacity-0'}`}>

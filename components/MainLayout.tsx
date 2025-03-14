@@ -113,7 +113,7 @@ export default function MainLayout() {
                     onClick={() => playSound('buttonClick')}
                   />
                   <h1 className={`ml-4 text-lg font-medium ${darkMode ? 'text-white' : 'text-gray-800'}`}>
-                    Bob AI Assistant
+                     AI Assistant
                   </h1>
                 </div>
                 
@@ -208,7 +208,7 @@ export default function MainLayout() {
                 transition-colors duration-200
                 ${darkMode ? 'text-gray-500' : 'text-gray-400'}
               `}>
-                © 2025 Bob AI Assistant • <a href="#" className="hover:underline" onClick={() => playSound('buttonClick')}>Privacy</a> • <a href="#" className="hover:underline" onClick={() => playSound('buttonClick')}>Terms</a>
+                © 2025 VoiceFlow AI Assistant • <a href="#" className="hover:underline" onClick={() => playSound('buttonClick')}>Privacy</a> • <a href="#" className="hover:underline" onClick={() => playSound('buttonClick')}>Terms</a>
               </div>
             </div>
             
@@ -220,7 +220,7 @@ export default function MainLayout() {
                   onClick={e => e.stopPropagation()}
                 >
                   <h2 className={`text-xl font-medium mb-4 ${darkMode ? 'text-white' : 'text-gray-800'}`}>
-                    How to use Bob
+                    How to use VoiceFlow
                   </h2>
                   <ul className={`space-y-3 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
                     <li className="flex">
@@ -229,7 +229,7 @@ export default function MainLayout() {
                     </li>
                     <li className="flex">
                       <span className="flex-shrink-0 mr-2">•</span>
-                      <span>Click the <strong>microphone</strong> to speak to Bob</span>
+                      <span>Click the <strong>microphone</strong> to speak to VoiceFlow</span>
                     </li>
                     <li className="flex">
                       <span className="flex-shrink-0 mr-2">•</span>

@@ -1,14 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 import { useTranslation } from 'next-i18next';
 import { useLanguage } from './LanguageManager';
-
 import { getChatGptAnswer } from './callUtil';
 import { CallHistoryType } from './CallHistory';
+import { speak as elevenLabsSpeak, stopSpeaking as elevenLabsStopSpeaking } from './elevenLabsService';
 
 export interface MessageType {
-  id: string;
   message: string;
   sender: string;
 }
@@ -23,6 +21,9 @@ interface CallContextType {
   handleSend: (message: string) => void;
   messages: MessageType[];
   isChatbotSpeaking: boolean;
+  selectedVoice: string;
+  availableVoices: { id: string, name: string }[];
+  setSelectedVoice: (voiceId: string) => void;
 }
 
 const CallContext = createContext<CallContextType | undefined>(undefined);
@@ -34,6 +35,7 @@ type CallManagerProps = {
 const CallManager: React.FC<CallManagerProps> = ({ children }) => {
   const isUserCalling = useRef(false);
   const isChatbotSpeaking = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const commands = [
     {
@@ -48,7 +50,6 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     commands,
   });
   const { t } = useTranslation();
-  const [userSpeechSynthesis, setUserSpeechSynthesis] = useState<SpeechSynthesis>();
   const [userLocalStorage, setUserLocalStorage] = useState<Storage>();
   const { selectedLanguage } = useLanguage();
   const defaultIntroduction = t('bob.introduction');
@@ -59,33 +60,112 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     },
   ];
   const [messages, setMessages] = useState<MessageType[]>(defaultMessage);
+  
+  // 11labs voice configuration
+  const [availableVoices, setAvailableVoices] = useState<{ id: string, name: string }[]>([
+    { id: 'default', name: 'Default Browser Voice' },
+    { id: '11labs-rachel', name: 'Rachel (11labs)' },
+    { id: '11labs-antoni', name: 'Antoni (11labs)' },
+    { id: '11labs-bella', name: 'Bella (11labs)' },
+    { id: '11labs-josh', name: 'Josh (11labs)' },
+    // Add more voices as needed
+  ]);
+  const [selectedVoice, setSelectedVoice] = useState('default');
+  const [isUsingElevenLabs, setIsUsingElevenLabs] = useState(false);
 
   useEffect(() => {
-    setUserSpeechSynthesis(window.speechSynthesis);
     setUserLocalStorage(localStorage);
+    
+    // Create audio element for 11labs playback
+    audioRef.current = new Audio();
+    audioRef.current.onended = handleChatbotSpeechEnd;
+    audioRef.current.onplay = handleChatbotSpeechStart;
+    
+    // Load selected voice from localStorage if available
+    const savedVoice = localStorage.getItem('selectedVoice');
+    if (savedVoice) {
+      setSelectedVoice(savedVoice);
+      setIsUsingElevenLabs(savedVoice !== 'default');
+    }
+
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
   }, []);
 
   // if selectedLanguage changes, reset call
   useEffect(() => {
     endCall();
   }, [defaultIntroduction, selectedLanguage]);
+  
+  // Update localStorage when voice changes
+  useEffect(() => {
+    if (userLocalStorage) {
+      userLocalStorage.setItem('selectedVoice', selectedVoice);
+      setIsUsingElevenLabs(selectedVoice !== 'default');
+    }
+  }, [selectedVoice, userLocalStorage]);
 
-  const chatBotSpeak = (message: string) => {
-    if (isChatbotSpeaking.current || !userSpeechSynthesis || !isUserCalling.current) {
+  const chatBotSpeak = async (message: string) => {
+    if (isChatbotSpeaking.current || !isUserCalling.current) {
       return;
     }
 
     if (!SpeechRecognition.browserSupportsSpeechRecognition()) {
-      userSpeechSynthesis.speak(
-        new SpeechSynthesisUtterance(t('bob.browserNotSupportSpeechRecognitionMessage'))
-      );
+      if (isUsingElevenLabs) {
+        const audioUrl = await elevenLabsSpeak(
+          t('bob.browserNotSupportSpeechRecognitionMessage'),
+          selectedVoice.replace('11labs-', ''),
+          selectedLanguage
+        );
+        
+        if (audioRef.current && audioUrl) {
+          audioRef.current.src = audioUrl;
+          audioRef.current.play();
+        }
+      } else {
+        // Fallback to browser speech
+        const utterance = new SpeechSynthesisUtterance(t('bob.browserNotSupportSpeechRecognitionMessage'));
+        utterance.lang = selectedLanguage;
+        utterance.onstart = handleChatbotSpeechStart;
+        utterance.onend = handleChatbotSpeechEnd;
+        window.speechSynthesis.speak(utterance);
+      }
       return;
     }
-    const utterance = new SpeechSynthesisUtterance(message);
-    utterance.lang = selectedLanguage;
-    utterance.onstart = handleChatbotSpeechStart;
-    utterance.onend = handleChatbotSpeechEnd;
-    userSpeechSynthesis.speak(utterance);
+
+    if (isUsingElevenLabs) {
+      try {
+        const audioUrl = await elevenLabsSpeak(
+          message,
+          selectedVoice.replace('11labs-', ''),
+          selectedLanguage
+        );
+        
+        if (audioRef.current && audioUrl) {
+          audioRef.current.src = audioUrl;
+          audioRef.current.play();
+        }
+      } catch (error) {
+        console.error('Error using 11labs voice:', error);
+        // Fallback to browser speech
+        const utterance = new SpeechSynthesisUtterance(message);
+        utterance.lang = selectedLanguage;
+        utterance.onstart = handleChatbotSpeechStart;
+        utterance.onend = handleChatbotSpeechEnd;
+        window.speechSynthesis.speak(utterance);
+      }
+    } else {
+      // Use browser's built-in speech synthesis
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.lang = selectedLanguage;
+      utterance.onstart = handleChatbotSpeechStart;
+      utterance.onend = handleChatbotSpeechEnd;
+      window.speechSynthesis.speak(utterance);
+    }
   };
 
   const handleChatbotSpeechStart = () => {
@@ -108,7 +188,6 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     }
     const formattedMessage = {
       message,
-      direction: 'outgoing',
       sender: 'user',
     };
 
@@ -121,11 +200,17 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
       isUserCalling.current = true;
       setIsCalling(isUserCalling.current);
     }
+    
     if (isChatbotSpeaking.current) {
-      userSpeechSynthesis?.cancel();
+      if (isUsingElevenLabs) {
+        elevenLabsStopSpeaking(audioRef.current);
+      } else {
+        window.speechSynthesis?.cancel();
+      }
       isChatbotSpeaking.current = false;
       setIsBobSpeaking(false);
     }
+    
     const chatGPTAnswer = await getChatGptAnswer(updatedMessages);
     setMessages([
       ...updatedMessages,
@@ -144,6 +229,7 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
       resetTranscript();
     }
   };
+  
   const userStopSpeaking = () => {
     SpeechRecognition.stopListening();
   };
@@ -196,11 +282,17 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     resetConversation();
     isUserCalling.current = false;
     setIsCalling(isUserCalling.current);
+    
     if (isChatbotSpeaking.current) {
-      userSpeechSynthesis?.cancel();
+      if (isUsingElevenLabs) {
+        elevenLabsStopSpeaking(audioRef.current);
+      } else {
+        window.speechSynthesis?.cancel();
+      }
       isChatbotSpeaking.current = false;
       setIsBobSpeaking(false);
     }
+    
     SpeechRecognition.abortListening();
   };
 
@@ -221,6 +313,9 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
         handleSend,
         messages,
         isChatbotSpeaking: isBobSpeaking,
+        selectedVoice,
+        availableVoices,
+        setSelectedVoice,
       }}
     >
       {children}
