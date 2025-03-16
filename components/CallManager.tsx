@@ -4,7 +4,8 @@ import { useTranslation } from 'next-i18next';
 import { useLanguage } from './LanguageManager';
 import { getChatGptAnswer } from './callUtil';
 import { CallHistoryType } from './CallHistory';
-import { speak as elevenLabsSpeak, stopSpeaking as elevenLabsStopSpeaking } from './elevenLabsService';
+// Fix import or comment out if not using
+// import { speak as elevenLabsSpeak, stopSpeaking as elevenLabsStopSpeaking } from './elevenLabsService';
 
 export interface MessageType {
   message: string;
@@ -108,6 +109,23 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
       setIsUsingElevenLabs(selectedVoice !== 'default');
     }
   }, [selectedVoice, userLocalStorage]);
+
+  // Mock function for elevenLabsSpeak if not available
+  const elevenLabsSpeak = async (
+    text: string, 
+    voice: string, 
+    language: string
+  ): Promise<string | null> => {
+    console.warn('ElevenLabs service not available');
+    return null;
+  };
+
+  // Mock function for elevenLabsStopSpeaking if not available
+  const elevenLabsStopSpeaking = (audioElement: HTMLAudioElement | null) => {
+    if (audioElement) {
+      audioElement.pause();
+    }
+  };
 
   const chatBotSpeak = async (message: string) => {
     if (isChatbotSpeaking.current || !isUserCalling.current) {

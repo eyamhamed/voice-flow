@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 
 interface ConversionIdeaProps {
@@ -8,7 +8,7 @@ interface ConversionIdeaProps {
 
 export default function ConversionIdea({ onSelect, className = '' }: ConversionIdeaProps) {
   // Categories of conversation starters
-  const ideaCategories = {
+  const ideaCategories = useMemo(() => ({
     "Fun": [
       "Tell me a joke",
       "What's the most interesting fact you know?",
@@ -27,7 +27,7 @@ export default function ConversionIdea({ onSelect, className = '' }: ConversionI
       "How does AI work?",
       "Teach me something new"
     ]
-  };
+  }), []);
 
   const [activeCategory, setActiveCategory] = useState<keyof typeof ideaCategories>("Fun");
   const [showAll, setShowAll] = useState(false);
@@ -42,7 +42,7 @@ export default function ConversionIdea({ onSelect, className = '' }: ConversionI
     } else {
       setVisibleIdeas(ideaCategories[activeCategory]);
     }
-  }, [activeCategory, showAll]);
+  }, [activeCategory, showAll, ideaCategories]);
 
   const nextCategory = () => {
     const categories = Object.keys(ideaCategories) as (keyof typeof ideaCategories)[];

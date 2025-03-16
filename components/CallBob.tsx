@@ -113,7 +113,7 @@ export default function CallBob() {
           <div className="w-full max-w-lg">
             <AnimatePresence mode="wait">
               <motion.div
-                key={messages[messages.length - 1]?.id || 'initial'}
+                key={messages.length > 0 ? `message-${messages.length}` : 'initial'}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -194,7 +194,7 @@ export default function CallBob() {
                 <div key={index} className="p-3 bg-gray-50 rounded-lg text-sm">
                   <p className="text-gray-800">{msg.message}</p>
                   <p className="text-xs text-gray-400 mt-1">
-                    {new Date(msg.timestamp || Date.now()).toLocaleTimeString()}
+                    {new Date().toLocaleTimeString()}
                   </p>
                 </div>
               ))}

@@ -16,6 +16,7 @@ export default function MessageBox({
   const [displayedText, setDisplayedText] = useState('');
   const [copied, setCopied] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [currentTime, setCurrentTime] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   
   // Extract message content if it's in an object format
@@ -25,6 +26,18 @@ export default function MessageBox({
     if (typeof message === 'object' && 'content' in message) return message.content;
     return '';
   };
+  
+  // Set current time only on client side to avoid hydration mismatch
+  useEffect(() => {
+    setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    
+    // Optional: Update time every minute
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    }, 60000);
+    
+    return () => clearInterval(timeInterval);
+  }, []);
   
   // Simulate typing effect
   useEffect(() => {
@@ -173,7 +186,8 @@ export default function MessageBox({
           <span className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Active</span>
         </div>
         <div className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-          {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {/* Only render time after client-side mount to prevent hydration mismatch */}
+          {currentTime}
         </div>
       </div>
     </div>
