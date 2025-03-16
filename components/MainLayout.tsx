@@ -6,7 +6,8 @@ import { Fragment, useState, useEffect, createContext, useContext } from 'react'
 import { CallHistory } from './CallHistory';
 import ConversionIdeasModal from './ConversationIdeasModal';
 import CallManager from './CallManager';
-import { Settings, Moon, Sun, HelpCircle } from 'lucide-react';
+import { Moon, Sun, HelpCircle } from 'lucide-react';
+import VoiceSettingsModal from './VoiceSettingsModal';
 
 const { Header, Content } = Layout;
 
@@ -250,18 +251,7 @@ export default function MainLayout() {
                     {/* Language Dropdown */}
                     <LanguageDropdown />
                     
-                    <button 
-                      className={`
-                        p-2 rounded-full transition-colors
-                        ${darkMode 
-                          ? 'hover:bg-gray-800 text-gray-400 hover:text-white' 
-                          : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'}
-                      `}
-                      aria-label="Settings"
-                      onClick={() => playSound('buttonClick')}
-                    >
-                      <Settings className="h-5 w-5" />
-                    </button>
+                    <VoiceSettingsModal darkMode={darkMode} />
                   </div>
                 </Header>
                 

@@ -4,8 +4,7 @@ import { useTranslation } from 'next-i18next';
 import { useLanguage } from './LanguageManager';
 import { getChatGptAnswer } from './callUtil';
 import { CallHistoryType } from './CallHistory';
-// Fix import or comment out if not using
-// import { speak as elevenLabsSpeak, stopSpeaking as elevenLabsStopSpeaking } from './elevenLabsService';
+import { speak as elevenLabsSpeak, stopSpeaking as elevenLabsStopSpeaking } from './elevenLabsService';
 
 export interface MessageType {
   message: string;
@@ -51,7 +50,7 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     commands,
   });
   const { t } = useTranslation();
-  const [userLocalStorage, setUserLocalStorage] = useState<Storage>();
+  const [userLocalStorage, setUserLocalStorage] = useState<Storage | null>(null);
   const { selectedLanguage } = useLanguage();
   const defaultIntroduction = t('bob.introduction');
   const defaultMessage = [
@@ -65,28 +64,34 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
   // 11labs voice configuration
   const [availableVoices, setAvailableVoices] = useState<{ id: string, name: string }[]>([
     { id: 'default', name: 'Default Browser Voice' },
-    { id: '11labs-rachel', name: 'Rachel (11labs)' },
-    { id: '11labs-antoni', name: 'Antoni (11labs)' },
-    { id: '11labs-bella', name: 'Bella (11labs)' },
-    { id: '11labs-josh', name: 'Josh (11labs)' },
+    { id: 'rachel', name: 'Rachel (11labs)' },
+    { id: 'antoni', name: 'Antoni (11labs)' },
+    { id: 'bella', name: 'Bella (11labs)' },
+    { id: 'josh', name: 'Josh (11labs)' },
     // Add more voices as needed
   ]);
   const [selectedVoice, setSelectedVoice] = useState('default');
   const [isUsingElevenLabs, setIsUsingElevenLabs] = useState(false);
 
   useEffect(() => {
-    setUserLocalStorage(localStorage);
-    
-    // Create audio element for 11labs playback
-    audioRef.current = new Audio();
-    audioRef.current.onended = handleChatbotSpeechEnd;
-    audioRef.current.onplay = handleChatbotSpeechStart;
-    
-    // Load selected voice from localStorage if available
-    const savedVoice = localStorage.getItem('selectedVoice');
-    if (savedVoice) {
-      setSelectedVoice(savedVoice);
-      setIsUsingElevenLabs(savedVoice !== 'default');
+    if (typeof window !== 'undefined') {
+      setUserLocalStorage(localStorage);
+      
+      // Create audio element for 11labs playback
+      audioRef.current = new Audio();
+      audioRef.current.onended = handleChatbotSpeechEnd;
+      audioRef.current.onplay = handleChatbotSpeechStart;
+      audioRef.current.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        handleChatbotSpeechEnd();
+      };
+      
+      // Load selected voice from localStorage if available
+      const savedVoice = localStorage.getItem('selectedVoice');
+      if (savedVoice) {
+        setSelectedVoice(savedVoice);
+        setIsUsingElevenLabs(savedVoice !== 'default');
+      }
     }
 
     return () => {
@@ -107,30 +112,16 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     if (userLocalStorage) {
       userLocalStorage.setItem('selectedVoice', selectedVoice);
       setIsUsingElevenLabs(selectedVoice !== 'default');
+      console.log('Voice changed to:', selectedVoice, 'Using ElevenLabs:', selectedVoice !== 'default');
     }
   }, [selectedVoice, userLocalStorage]);
-
-  // Mock function for elevenLabsSpeak if not available
-  const elevenLabsSpeak = async (
-    text: string, 
-    voice: string, 
-    language: string
-  ): Promise<string | null> => {
-    console.warn('ElevenLabs service not available');
-    return null;
-  };
-
-  // Mock function for elevenLabsStopSpeaking if not available
-  const elevenLabsStopSpeaking = (audioElement: HTMLAudioElement | null) => {
-    if (audioElement) {
-      audioElement.pause();
-    }
-  };
 
   const chatBotSpeak = async (message: string) => {
     if (isChatbotSpeaking.current || !isUserCalling.current) {
       return;
     }
+
+    console.log('chatBotSpeak called with voice:', selectedVoice, 'Using ElevenLabs:', isUsingElevenLabs);
 
     if (!SpeechRecognition.browserSupportsSpeechRecognition()) {
       if (isUsingElevenLabs) {
@@ -141,8 +132,15 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
         );
         
         if (audioRef.current && audioUrl) {
+          console.log('Setting audio source to:', audioUrl);
           audioRef.current.src = audioUrl;
-          audioRef.current.play();
+          audioRef.current.play().catch(err => {
+            console.error('Audio play error:', err);
+            handleChatbotSpeechEnd();
+          });
+        } else {
+          console.error('No audio URL or audio element available');
+          handleChatbotSpeechEnd();
         }
       } else {
         // Fallback to browser speech
@@ -157,15 +155,23 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
 
     if (isUsingElevenLabs) {
       try {
+        console.log('Using ElevenLabs for speech with voice:', selectedVoice);
         const audioUrl = await elevenLabsSpeak(
           message,
-          selectedVoice.replace('11labs-', ''),
+          selectedVoice,
           selectedLanguage
         );
         
         if (audioRef.current && audioUrl) {
+          console.log('Setting audio source to:', audioUrl);
           audioRef.current.src = audioUrl;
-          audioRef.current.play();
+          audioRef.current.play().catch(err => {
+            console.error('Audio play error:', err);
+            handleChatbotSpeechEnd();
+          });
+        } else {
+          console.error('No audio URL or audio element available');
+          handleChatbotSpeechEnd();
         }
       } catch (error) {
         console.error('Error using 11labs voice:', error);
@@ -178,6 +184,7 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
       }
     } else {
       // Use browser's built-in speech synthesis
+      console.log('Using browser speech synthesis');
       const utterance = new SpeechSynthesisUtterance(message);
       utterance.lang = selectedLanguage;
       utterance.onstart = handleChatbotSpeechStart;
@@ -187,12 +194,14 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
   };
 
   const handleChatbotSpeechStart = () => {
+    console.log('Speech started');
     isChatbotSpeaking.current = true;
     setIsBobSpeaking(true);
     SpeechRecognition.stopListening();
   };
 
   const handleChatbotSpeechEnd = () => {
+    console.log('Speech ended');
     if (isUserCalling.current) {
       SpeechRecognition.startListening({ language: selectedLanguage });
     }
@@ -204,6 +213,9 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     if (!message) {
       return;
     }
+    
+    console.log('handleSend called with message:', message);
+    
     const formattedMessage = {
       message,
       sender: 'user',

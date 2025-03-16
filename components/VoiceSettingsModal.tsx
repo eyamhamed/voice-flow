@@ -1,255 +1,123 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Select, Switch, Slider, Divider, Spin } from 'antd';
+import { Settings, X, Volume2, Check } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useCallManager } from './CallManager';
-import { fetchVoices } from './elevenLabsService';
-import { useTranslation } from 'next-i18next';
+import { useSoundEffects } from './MainLayout';
 
-type VoiceSettingsModalProps = {
-  visible: boolean;
-  onClose: () => void;
-  customProps?: {
-    playSound?: (sound: string) => void;
-  };
-};
+interface VoiceSettingsModalProps {
+  darkMode?: boolean;
+}
 
-const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ 
-  visible, 
-  onClose, 
-  customProps 
-}) => {
-  const { t } = useTranslation();
-  const { 
-    selectedVoice, 
-    setSelectedVoice, 
-    availableVoices 
-  } = useCallManager();
-  
-  const [loading, setLoading] = useState(false);
-  const [voiceStability, setVoiceStability] = useState(0.5);
-  const [voiceSimilarity, setVoiceSimilarity] = useState(0.75);
-  const [useElevenLabs, setUseElevenLabs] = useState(selectedVoice !== 'default');
-  const [apiKey, setApiKey] = useState('');
-  const [apiKeyStatus, setApiKeyStatus] = useState<'none' | 'valid' | 'invalid'>('none');
-  
-  useEffect(() => {
-    // Load API key from localStorage
-    const savedApiKey = localStorage.getItem('elevenLabsApiKey') || '';
-    setApiKey(savedApiKey);
-    
-    // Load voice settings from localStorage
-    const savedStability = localStorage.getItem('voiceStability');
-    const savedSimilarity = localStorage.getItem('voiceSimilarity');
-    
-    if (savedStability) setVoiceStability(parseFloat(savedStability));
-    if (savedSimilarity) setVoiceSimilarity(parseFloat(savedSimilarity));
-    
-    // Verify if we have a stored API key
-    if (savedApiKey) {
-      validateApiKey(savedApiKey);
-    }
-  }, []);
-  
-  // Effect for enabling/disabling ElevenLabs
-  useEffect(() => {
-    setUseElevenLabs(selectedVoice !== 'default');
-  }, [selectedVoice]);
-  
-  const validateApiKey = async (key: string) => {
-    setLoading(true);
-    try {
-      // Store API key temporarily for the validation request
-      localStorage.setItem('elevenLabsApiKey', key);
-      
-      // Try fetching voices to validate
-      const voices = await fetchVoices();
-      if (voices && voices.length > 0) {
-        setApiKeyStatus('valid');
-      } else {
-        setApiKeyStatus('invalid');
-      }
-    } catch (error) {
-      console.error('API key validation error:', error);
-      setApiKeyStatus('invalid');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  const handleVoiceChange = (value: string) => {
-    if (customProps?.playSound) {
-      customProps.playSound('buttonClick');
-    }
-    setSelectedVoice(value);
-  };
-  
-  const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setApiKey(e.target.value);
-    setApiKeyStatus('none');
-  };
-  
-  const handleSaveSettings = () => {
-    // Save voice settings to localStorage
-    localStorage.setItem('voiceStability', voiceStability.toString());
-    localStorage.setItem('voiceSimilarity', voiceSimilarity.toString());
-    
-    if (apiKey) {
-      localStorage.setItem('elevenLabsApiKey', apiKey);
-    }
-    
-    if (customProps?.playSound) {
-      customProps.playSound('buttonClick');
-    }
-    
-    onClose();
-  };
-  
-  const handleVerifyApiKey = () => {
-    if (customProps?.playSound) {
-      customProps.playSound('buttonClick');
-    }
-    validateApiKey(apiKey);
-  };
-  
-  const handleUseElevenLabsToggle = (checked: boolean) => {
-    if (customProps?.playSound) {
-      customProps.playSound('toggleSwitch');
-    }
-    setUseElevenLabs(checked);
-    if (!checked) {
-      setSelectedVoice('default');
-    } else if (availableVoices.length > 1) {
-      // Select first non-default voice
-      const firstElevenLabsVoice = availableVoices.find(voice => voice.id !== 'default');
-      if (firstElevenLabsVoice) {
-        setSelectedVoice(firstElevenLabsVoice.id);
-      }
-    }
+export default function VoiceSettingsModal({ darkMode = false }: VoiceSettingsModalProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { selectedVoice, setSelectedVoice, availableVoices } = useCallManager();
+  const { playSound } = useSoundEffects();
+
+  const toggleModal = () => {
+    playSound('buttonClick');
+    setIsOpen(!isOpen);
   };
 
   return (
-    <Modal
-      title={t('voice.settings.title', 'Voice Settings')}
-      open={visible}
-      onCancel={onClose}
-      onOk={handleSaveSettings}
-      okText={t('voice.settings.save', 'Save Settings')}
-      cancelText={t('voice.settings.cancel', 'Cancel')}
-      className="voice-settings-modal"
-    >
-      <div className="space-y-6">
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="font-medium">{t('voice.settings.useElevenLabs', 'Use ElevenLabs Voices')}</span>
-            <Switch 
-              checked={useElevenLabs} 
-              onChange={handleUseElevenLabsToggle} 
-            />
-          </div>
-          <p className="text-sm text-gray-500">
-            {t('voice.settings.useElevenLabsDescription', 'Switch between browser\'s built-in voices and premium ElevenLabs voices')}
-          </p>
-        </div>
-        
-        {useElevenLabs && (
-          <>
-            <Divider className="my-4" />
-            
-            <div>
-              <div className="mb-2 font-medium">
-                {t('voice.settings.apiKey', 'ElevenLabs API Key')}
-              </div>
-              <div className="flex space-x-2">
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={handleApiKeyChange}
-                  placeholder={t('voice.settings.apiKeyPlaceholder', 'Enter your ElevenLabs API key')}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+    <>
+      {/* Settings button */}
+      <button
+        onClick={toggleModal}
+        className={`
+          p-2 rounded-full transition-colors
+          ${darkMode 
+            ? 'hover:bg-gray-800 text-gray-400 hover:text-white' 
+            : 'hover:bg-gray-100 text-gray-500 hover:text-gray-700'}
+        `}
+        aria-label="Voice Settings"
+      >
+        <Settings className="h-5 w-5" />
+      </button>
+
+      {/* Modal */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsOpen(false)}
+          >
+            <motion.div
+              className={`w-full max-w-md rounded-xl p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h2 className={`text-xl font-medium ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                  Voice Settings
+                </h2>
                 <button
-                  onClick={handleVerifyApiKey}
-                  disabled={loading || !apiKey}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  onClick={toggleModal}
+                  className={`p-1 rounded-full ${darkMode ? 'hover:bg-gray-700 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}
+                  aria-label="Close"
                 >
-                  {loading ? <Spin size="small" /> : t('voice.settings.verify', 'Verify')}
+                  <X className="h-5 w-5" />
                 </button>
               </div>
-              
-              {apiKeyStatus === 'valid' && (
-                <div className="mt-1 text-sm text-green-500">
-                  {t('voice.settings.apiKeyValid', 'API key is valid')}
-                </div>
-              )}
-              
-              {apiKeyStatus === 'invalid' && (
-                <div className="mt-1 text-sm text-red-500">
-                  {t('voice.settings.apiKeyInvalid', 'Invalid API key')}
-                </div>
-              )}
-              
-              <p className="mt-2 text-sm text-gray-500">
-                {t('voice.settings.apiKeyInfo', 'Your API key is stored locally in your browser and never sent to our servers')}
-              </p>
-            </div>
-            
-            <div>
-              <div className="mb-2 font-medium">
-                {t('voice.settings.selectVoice', 'Select Voice')}
-              </div>
-              <Select
-                value={selectedVoice}
-                onChange={handleVoiceChange}
-                className="w-full"
-                disabled={!useElevenLabs || apiKeyStatus !== 'valid'}
-              >
-                {availableVoices.map((voice) => (
-                  <Select.Option key={voice.id} value={voice.id}>
-                    {voice.name}
-                  </Select.Option>
-                ))}
-              </Select>
-            </div>
-            
-            <div>
-              <div className="mb-2 font-medium">
-                {t('voice.settings.voiceStability', 'Voice Stability')}
-                <span className="ml-2 text-sm text-gray-500">({voiceStability.toFixed(2)})</span>
-              </div>
-              <Slider
-                min={0}
-                max={1}
-                step={0.01}
-                value={voiceStability}
-                onChange={(value) => setVoiceStability(value)}
-                disabled={!useElevenLabs || apiKeyStatus !== 'valid'}
-              />
-              <p className="mt-1 text-sm text-gray-500">
-                {t('voice.settings.voiceStabilityDescription', 'Higher values make the voice more stable and less expressive')}
-              </p>
-            </div>
-            
-            <div>
-              <div className="mb-2 font-medium">
-                {t('voice.settings.voiceSimilarity', 'Voice Similarity')}
-                <span className="ml-2 text-sm text-gray-500">({voiceSimilarity.toFixed(2)})</span>
-              </div>
-              <Slider
-                min={0}
-                max={1}
-                step={0.01}
-                value={voiceSimilarity}
-                onChange={(value) => setVoiceSimilarity(value)}
-                disabled={!useElevenLabs || apiKeyStatus !== 'valid'}
-              />
-              <p className="mt-1 text-sm text-gray-500">
-                {t('voice.settings.voiceSimilarityDescription', 'Higher values ensure the voice stays closer to the original')}
-              </p>
-            </div>
-          </>
-        )}
-      </div>
-    </Modal>
-  );
-};
 
-export default VoiceSettingsModal;
+              <div className="mb-4">
+                <p className={`text-sm mb-2 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  Select a voice for the AI assistant:
+                </p>
+                
+                <div className="space-y-2 mt-3">
+                  {availableVoices.map((voice) => (
+                    <button
+                      key={voice.id}
+                      onClick={() => {
+                        playSound('buttonClick');
+                        setSelectedVoice(voice.id);
+                      }}
+                      className={`
+                        w-full text-left py-2 px-3 rounded-lg flex items-center justify-between
+                        ${selectedVoice === voice.id 
+                          ? (darkMode ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-800') 
+                          : (darkMode ? 'bg-gray-700 text-gray-200 hover:bg-gray-600' : 'bg-gray-100 text-gray-800 hover:bg-gray-200')}
+                        transition-colors
+                      `}
+                    >
+                      <div className="flex items-center">
+                        <Volume2 className="h-4 w-4 mr-2" />
+                        <span>{voice.name}</span>
+                      </div>
+                      {selectedVoice === voice.id && (
+                        <Check className="h-4 w-4" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`text-xs mt-6 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                <p>The default browser voice doesnt require an internet connection. ElevenLabs voices offer better quality but require API access.</p>
+              </div>
+
+              <div className="mt-6">
+                <button
+                  onClick={toggleModal}
+                  className={`
+                    w-full py-2 rounded-lg font-medium
+                    ${darkMode 
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                      : 'bg-blue-500 hover:bg-blue-600 text-white'}
+                  `}
+                >
+                  Done
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
