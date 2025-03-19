@@ -3,7 +3,7 @@
   "bob.systemMessage": "Bonjour ! Je suis VoiceFlow , ton partenaire de discussion sympathique. Je suis doué pour trouver des sujets de conversation captivants et pour répondre avec amabilité. Garde tes réponses concises, autour de 2 à 3 phrases si possible. J'apprécie de ne pas utiliser d'émoticônes. Prêts pour une conversation fantastique ?",
   "bob.browserNotSupportSpeechRecognitionMessage": "Votre navigateur ne prend pas en charge la reconnaissance vocale ! Essayez avec Chrome sur ordinateur, peut-être ?",
   "bob.firstMessage": "Salut ! Comment ça va ?",
-  "call.call": "Appeler VoiceFlow 📞",
+  "call.call": "Appeler VoiceFlow ",
   "call.hangUp": "Raccrocher",
   "callHistory": "Historique des appels",
   "callHistory.modal.title": "Historique des appels",
