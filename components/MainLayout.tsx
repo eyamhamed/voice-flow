@@ -8,7 +8,6 @@ import ConversionIdeasModal from './ConversationIdeasModal';
 import CallManager from './CallManager';
 import { Moon, Sun, HelpCircle } from 'lucide-react';
 import VoiceSettingsModal from './VoiceSettingsModal';
-
 const { Header, Content } = Layout;
 
 // Sound effects URLs
@@ -19,7 +18,9 @@ const SOUNDS = {
   callEnd: 'https://www.soundjay.com/phone/phone-hang-up-1.mp3',
   notification: 'https://www.soundjay.com/button/button-35.mp3',
   helpOpen: 'https://www.soundjay.com/interface/interface-124.mp3',
-  helpClose: 'https://www.soundjay.com/interface/interface-126.mp3'
+  helpClose: 'https://www.soundjay.com/interface/interface-126.mp3',
+  // Add your background music URL here
+  backgroundMusic: '/sounds/background-music.mp3'
 };
 
 // Define an interface for the audio cache
@@ -31,6 +32,11 @@ interface AudioCache {
 interface SoundContextType {
   playSound: (soundName: string) => void;
   soundEnabled: boolean;
+  setBackgroundVolume: (volume: number) => void;
+  pauseBackgroundMusic: () => void;
+  resumeBackgroundMusic: () => void;
+  isConversationActive: boolean;
+  setConversationActive: (active: boolean) => void;
 }
 
 const SoundContext = createContext<SoundContextType | undefined>(undefined);
@@ -50,20 +56,41 @@ export default function MainLayout() {
   const [showCallHistory, setShowCallHistory] = useState(false);
   const [audioCache, setAudioCache] = useState<AudioCache>({});
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [backgroundMusic, setBackgroundMusic] = useState<HTMLAudioElement | null>(null);
+  const [isConversationActive, setConversationActive] = useState(false);
   
   // Initialize audio objects
   useEffect(() => {
     const cache: AudioCache = {};
+    // Initialize regular sound effects
     Object.entries(SOUNDS).forEach(([key, url]) => {
-      cache[key] = new Audio(url);
-      cache[key].preload = 'auto';
+      if (key !== 'backgroundMusic') {
+        cache[key] = new Audio(url);
+        cache[key].preload = 'auto';
+      }
     });
     setAudioCache(cache);
+    
+    // Initialize background music separately
+    const music = new Audio(SOUNDS.backgroundMusic);
+    music.loop = true;
+    music.volume = 0.1; // Default volume (low)
+    music.preload = 'auto';
+    setBackgroundMusic(music);
     
     // Load sound setting from localStorage if available
     const savedSoundSetting = localStorage.getItem('soundEnabled');
     if (savedSoundSetting !== null) {
-      setSoundEnabled(savedSoundSetting === 'true');
+      const enabled = savedSoundSetting === 'true';
+      setSoundEnabled(enabled);
+      if (enabled) {
+        // Auto-play background music if sounds are enabled
+        // Note: Modern browsers may block autoplay without user interaction
+        music.play().catch(err => console.log('Background music autoplay error:', err));
+      }
+    } else {
+      // Default: play music if no saved setting
+      music.play().catch(err => console.log('Background music autoplay error:', err));
     }
     
     return () => {
@@ -72,14 +99,54 @@ export default function MainLayout() {
         audio.pause();
         audio.src = '';
       });
+      
+      // Cleanup background music
+      if (music) {
+        music.pause();
+        music.src = '';
+      }
     };
   }, []);
+  
+  // Effect to handle conversation status changes
+  useEffect(() => {
+    if (backgroundMusic && soundEnabled) {
+      if (isConversationActive) {
+        // Make background music very quiet during conversation
+        backgroundMusic.volume = 0.02; // Extremely low volume during conversations
+      } else {
+        // Return to normal low volume when conversation ends
+        backgroundMusic.volume = 0.1;
+      }
+    }
+  }, [isConversationActive, soundEnabled, backgroundMusic]);
   
   // Function to play sounds
   const playSound = (soundName: string) => {
     if (soundEnabled && audioCache[soundName]) {
       audioCache[soundName].currentTime = 0;
       audioCache[soundName].play().catch(err => console.log('Audio play error:', err));
+    }
+  };
+  
+  // Function to control background music volume
+  const setBackgroundVolume = (volume: number) => {
+    if (backgroundMusic && soundEnabled) {
+      // Ensure volume is between 0 and 1
+      backgroundMusic.volume = Math.max(0, Math.min(1, volume));
+    }
+  };
+  
+  // Functions to pause/resume background music
+  const pauseBackgroundMusic = () => {
+    if (backgroundMusic) {
+      backgroundMusic.pause();
+    }
+  };
+  
+  const resumeBackgroundMusic = () => {
+    if (backgroundMusic && soundEnabled) {
+      backgroundMusic.play().catch(err => console.log('Background music resume error:', err));
     }
   };
   
@@ -99,8 +166,19 @@ export default function MainLayout() {
     const newSetting = !soundEnabled;
     setSoundEnabled(newSetting);
     localStorage.setItem('soundEnabled', String(newSetting));
+    
     if (newSetting) {
       playSound('buttonClick');
+      if (backgroundMusic) {
+        // Resume background music when sound is enabled
+        backgroundMusic.volume = isConversationActive ? 0.02 : 0.1;
+        backgroundMusic.play().catch(err => console.log('Background music resume error:', err));
+      }
+    } else {
+      if (backgroundMusic) {
+        // Pause background music when sound is disabled
+        backgroundMusic.pause();
+      }
     }
   };
 
@@ -122,7 +200,12 @@ export default function MainLayout() {
   // Sound context value
   const soundContextValue = {
     playSound,
-    soundEnabled
+    soundEnabled,
+    setBackgroundVolume,
+    pauseBackgroundMusic,
+    resumeBackgroundMusic,
+    isConversationActive,
+    setConversationActive
   };
 
   return (
