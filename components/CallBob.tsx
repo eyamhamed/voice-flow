@@ -3,9 +3,11 @@ import React, { useState, useEffect } from 'react';
 import ConversionIdea from './ConversionIdea';
 import MessageBox from './MessageBox';
 import TalkButton from './TalkButton';
+import IkigaiOptionButtons from './IkigaiOptionButtons';
 import { useCallManager } from './CallManager';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, VolumeX, Volume2, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { ArrowLeft, VolumeX, Volume2, ThumbsUp, ThumbsDown, Send } from 'lucide-react';
+import { useTranslation } from 'next-i18next';
 
 export default function CallBob() {
   const {
@@ -18,12 +20,17 @@ export default function CallBob() {
     handleSend,
     messages,
     isChatbotSpeaking,
+    startIkigaiFlow,
+    currentStep,
+    ikigaiOptions,
   } = useCallManager();
 
+  const { t } = useTranslation();
   const [muted, setMuted] = useState(false);
   const [messageHistory, setMessageHistory] = useState(false);
   const [feedback, setFeedback] = useState<null | 'positive' | 'negative'>(null);
   const [bobMood, setBobMood] = useState<'neutral' | 'happy' | 'thinking'>('neutral');
+  const [userInput, setUserInput] = useState('');
 
   // Update Bob's mood based on conversation state
   useEffect(() => {
@@ -41,6 +48,22 @@ export default function CallBob() {
   
   // Handle showing message history
   const toggleHistory = () => setMessageHistory(!messageHistory);
+
+  // Handle manually sending a message
+  const handleManualSend = () => {
+    if (userInput.trim()) {
+      handleSend(userInput);
+      setUserInput('');
+    }
+  };
+
+  // Handle Enter key press
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleManualSend();
+    }
+  };
 
   return (
     <div className="relative min-h-[calc(100vh-10rem)]">
@@ -144,6 +167,49 @@ export default function CallBob() {
             </AnimatePresence>
           </div>
           
+          {/* Ikigai Option Buttons - show when we have options */}
+          <AnimatePresence>
+            {ikigaiOptions.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="w-full flex justify-center"
+              >
+                <IkigaiOptionButtons />
+              </motion.div>
+            )}
+          </AnimatePresence>
+          
+          {/* Text input for typing responses */}
+          {isCalling && (
+            <motion.div 
+              className="w-full max-w-lg"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <div className="relative">
+                <input
+                  type="text"
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder={t('buttons.typeResponse', "Type your response...")}
+                  className="w-full px-4 py-3 pr-12 rounded-full border-2 border-gray-200 focus:border-blue-500 focus:outline-none"
+                  disabled={isChatbotSpeaking}
+                />
+                <button
+                  onClick={handleManualSend}
+                  disabled={!userInput.trim() || isChatbotSpeaking}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-blue-500 hover:text-blue-600 disabled:text-gray-300"
+                >
+                  <Send className="h-5 w-5" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+          
           {/* Interaction controls */}
           <motion.div 
             className="flex flex-col items-center gap-6"
@@ -151,20 +217,46 @@ export default function CallBob() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.4 }}
           >
-            <TalkButton
-              userCall={userCall}
-              userSpeak={userSpeak}
-              userStopSpeaking={userStopSpeaking}
-              listening={listening}
-              isCalling={isCalling}
-              endCall={endCall}
-              isChatbotSpeaking={isChatbotSpeaking}
-            />
-            
-            <ConversionIdea 
-              onSelect={handleSend} 
-              className="mt-2"
-            />
+            {!isCalling ? (
+              <>
+                <TalkButton
+                  userCall={userCall}
+                  userSpeak={userSpeak}
+                  userStopSpeaking={userStopSpeaking}
+                  listening={listening}
+                  isCalling={isCalling}
+                  endCall={endCall}
+                  isChatbotSpeaking={isChatbotSpeaking}
+                />
+                
+                {/* Start Ikigai Flow Button */}
+                <motion.button
+                  onClick={startIkigaiFlow}
+                  className="px-6 py-3 bg-indigo-600 text-white rounded-full font-medium 
+                          shadow-md hover:bg-indigo-700 active:bg-indigo-800 
+                          transition-colors duration-150"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  {t('buttons.startIkigai')}
+                </motion.button>
+                
+                <ConversionIdea 
+                  onSelect={handleSend} 
+                  className="mt-2"
+                />
+              </>
+            ) : (
+              <TalkButton
+                userCall={userCall}
+                userSpeak={userSpeak}
+                userStopSpeaking={userStopSpeaking}
+                listening={listening}
+                isCalling={isCalling}
+                endCall={endCall}
+                isChatbotSpeaking={isChatbotSpeaking}
+              />
+            )}
           </motion.div>
         </motion.div>
       </div>
