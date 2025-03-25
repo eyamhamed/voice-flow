@@ -1,0 +1,25 @@
+// types.ts
+export enum ConversationStep {
+  INTRODUCTION,
+  READY_CHECK,
+  PASSIONS,
+  VALIDATE_PASSIONS,
+  TALENTS,
+  VALIDATE_TALENTS,
+  WORLD_NEEDS,
+  VALIDATE_WORLD_NEEDS,
+  MONETIZATION,
+  VALIDATE_MONETIZATION,
+  SUMMARY,
+  EMAIL_REQUEST,
+  CONTACT_ENTRY,
+  COACHING,
+  COACHING_SCHEDULE,
+  COACHING_CONFIRMATION,
+  CONCLUSION
+}
+
+export interface MessageType {
+  message: string;
+  sender: string;
+}

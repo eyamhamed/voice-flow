@@ -1,37 +1,11 @@
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 import { useTranslation } from 'next-i18next';
 import { useLanguage } from './LanguageManager';
 import { getChatGptAnswer } from './callUtil';
 import { CallHistoryType } from './CallHistory';
 import { speak as elevenLabsSpeak, stopSpeaking as elevenLabsStopSpeaking } from './elevenLabsService';
-import jsPDF from 'jspdf';
-
-// Define the conversation steps for Ikigai
-enum ConversationStep {
-  INTRODUCTION,
-  READY_CHECK,
-  PASSIONS,
-  VALIDATE_PASSIONS,
-  TALENTS,
-  VALIDATE_TALENTS,
-  WORLD_NEEDS,
-  VALIDATE_WORLD_NEEDS,
-  MONETIZATION,
-  VALIDATE_MONETIZATION,
-  SUMMARY,
-  EMAIL_REQUEST,
-  CONTACT_ENTRY,
-  COACHING,
-  COACHING_SCHEDULE,
-  COACHING_CONFIRMATION,
-  CONCLUSION
-}
-
-export interface MessageType {
-  message: string;
-  sender: string;
-}
+import { ConversationStep, MessageType } from './types'; // Fix the import
 
 interface IkigaiData {
   passions: string;
@@ -64,8 +38,6 @@ interface CallContextType {
   ikigaiSummary: string;
   isProcessingIkigai: boolean;
   startIkigaiFlow: () => void;
-  summaryShown: boolean;
-  savePDF: () => string | null;
 }
 
 const CallContext = createContext<CallContextType | undefined>(undefined);
@@ -78,7 +50,6 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
   const isUserCalling = useRef(false);
   const isChatbotSpeaking = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const isInitialRender = useRef(true);
 
   // Translation hooks
   const { t, i18n } = useTranslation();
@@ -95,7 +66,10 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
   const [isProcessingIkigai, setIsProcessingIkigai] = useState<boolean>(false);
   const [ikigaiUserResponses, setIkigaiUserResponses] = useState<{step: ConversationStep, response: string}[]>([]);
   const [isRunningIkigaiFlow, setIsRunningIkigaiFlow] = useState<boolean>(false);
-  const [summaryShown, setSummaryShown] = useState<boolean>(false);
+  
+  // New state variables to fix the infinite loop
+  const [currentMessage, setCurrentMessage] = useState<string>('');
+  const [currentOptions, setCurrentOptions] = useState<string[]>([]);
   
   const commands = [
     {
@@ -112,8 +86,16 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
   const [userLocalStorage, setUserLocalStorage] = useState<Storage | null>(null);
   const { selectedLanguage } = useLanguage();
   
-  // Initialize messages with an empty array first to avoid translation-based re-renders
-  const [messages, setMessages] = useState<MessageType[]>([]);
+  const defaultIntroduction = t('bob.introduction');
+  // Wrap in useMemo to fix the ESLint error
+  const defaultMessage = useMemo(() => [
+    {
+      message: defaultIntroduction,
+      sender: 'ChatGPT',
+    },
+  ], [defaultIntroduction]);
+  
+  const [messages, setMessages] = useState<MessageType[]>(defaultMessage);
   
   // 11labs voice configuration
   const [availableVoices, setAvailableVoices] = useState<{ id: string, name: string }[]>([
@@ -127,21 +109,215 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
   const [selectedVoice, setSelectedVoice] = useState('default');
   const [isUsingElevenLabs, setIsUsingElevenLabs] = useState(false);
 
-  // Initialize default message in useEffect rather than directly in render cycle
-  useEffect(() => {
-    // Only set the default message once, or when translations change
-    if (messages.length === 0 || isInitialRender.current) {
-      const defaultIntroduction = t('bob.introduction');
-      const defaultMessage = [
-        {
-          message: defaultIntroduction,
-          sender: 'ChatGPT',
-        },
-      ];
-      setMessages(defaultMessage);
-      isInitialRender.current = false;
+  // SMART IKIGAI ANALYSIS FUNCTIONS
+
+  // 1. Analyze responses to extract meaning from natural language
+  const analyzeResponse = useCallback((response: string, context: string): { 
+    topics: string[],
+    sentiment: 'positive' | 'negative' | 'neutral',
+    confidence: number,
+    keywords: string[]
+  } => {
+    // Extract keywords from text
+    const extractKeywords = (text: string): string[] => {
+      const stopWords = ['and', 'or', 'the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'about', 'je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles', 'le', 'la', 'les', 'un', 'une', 'des', 'de', 'du', 'et', 'ou', 'pour', 'par', 'dans'];
+      
+      // Normalize text: lowercase, remove punctuation, split into words
+      const words = text.toLowerCase()
+        .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
+        .split(/\s+/);
+      
+      // Filter out stop words and short words
+      const filteredWords = words.filter(word => 
+        word.length > 2 && !stopWords.includes(word.toLowerCase())
+      );
+      
+      // Count word frequencies
+      const wordFreq: {[key: string]: number} = {};
+      filteredWords.forEach(word => {
+        wordFreq[word] = (wordFreq[word] || 0) + 1;
+      });
+      
+      // Sort by frequency and return top keywords
+      return Object.entries(wordFreq)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([word]) => word);
+    };
+    
+    // Estimate sentiment using keyword matching
+    const estimateSentiment = (text: string): 'positive' | 'negative' | 'neutral' => {
+      const positiveWords = ['love', 'enjoy', 'happy', 'good', 'great', 'excellent', 'wonderful', 'amazing', 'like', 'passion', 'joy', 'excited', 
+                            'aimer', 'adorer', 'heureux', 'heureuse', 'bon', 'bonne', 'excellent', 'excellente', 'passion', 'joie'];
+      const negativeWords = ['hate', 'dislike', 'bad', 'terrible', 'awful', 'boring', 'difficult', 'hard', 'struggle', 'problem', 'issue', 'worry',
+                            'détester', 'mauvais', 'mauvaise', 'terrible', 'ennuyeux', 'ennuyeuse', 'difficile', 'problème', 'inquiéter'];
+      
+      const lowercaseText = text.toLowerCase();
+      let positiveCount = 0;
+      let negativeCount = 0;
+      
+      positiveWords.forEach(word => {
+        if (lowercaseText.includes(word)) positiveCount++;
+      });
+      
+      negativeWords.forEach(word => {
+        if (lowercaseText.includes(word)) negativeCount++;
+      });
+      
+      if (positiveCount > negativeCount) return 'positive';
+      if (negativeCount > positiveCount) return 'negative';
+      return 'neutral';
+    };
+    
+    // Extract topics based on conversation context
+    const extractTopics = (text: string, context: string): string[] => {
+      const keywords = extractKeywords(text);
+      let topics: string[] = [];
+      
+      // Adjust extraction strategy based on what we're asking about
+      switch(context) {
+        case 'passions':
+          // Look for activities, hobbies, interests
+          const passionPhrases = text.match(/(?:j'aime|j'adore|je suis passionné par|i love|i enjoy|i'm passionate about)(?:\s\w+){1,5}/gi) || [];
+          passionPhrases.forEach(phrase => {
+            const cleanPhrase = phrase.replace(/(?:j'aime|j'adore|je suis passionné par|i love|i enjoy|i'm passionate about)\s/gi, '').trim();
+            if (cleanPhrase.length > 2) topics.push(cleanPhrase);
+          });
+          break;
+          
+        case 'talents':
+          // Look for skills, abilities, strengths
+          const talentPhrases = text.match(/(?:je suis doué|je suis bon|je suis forte|i'm good at|i excel at|my skill is)(?:\s\w+){1,5}/gi) || [];
+          talentPhrases.forEach(phrase => {
+            const cleanPhrase = phrase.replace(/(?:je suis doué|je suis bon|je suis forte|i'm good at|i excel at|my skill is)\s/gi, '').trim();
+            if (cleanPhrase.length > 2) topics.push(cleanPhrase);
+          });
+          break;
+          
+        case 'world_needs':
+          // Look for global issues, problems, concerns
+          const problemPhrases = text.match(/(?:problème|problem|issue|challenge|défi|besoin|need)(?:\s\w+){1,5}/gi) || [];
+          problemPhrases.forEach(phrase => {
+            if (phrase.length > 5) topics.push(phrase.trim());
+          });
+          break;
+
+        case 'monetization':
+          // Look for job titles, professions, business ideas
+          const jobPhrases = text.match(/(?:métier|profession|job|career|business|entreprise)(?:\s\w+){1,5}/gi) || [];
+          jobPhrases.forEach(phrase => {
+            if (phrase.length > 5) topics.push(phrase.trim());
+          });
+          break;
+      }
+      
+      // If no specific topics found, return general keywords
+      return topics.length > 0 ? topics : keywords;
+    };
+    
+    const keywords = extractKeywords(response);
+    const sentiment = estimateSentiment(response);
+    const topics = extractTopics(response, context);
+    
+    // Calculate confidence based on response length and keyword relevance
+    const confidence = Math.min(1, (response.length / 50) * 0.5 + (topics.length / 3) * 0.5);
+    
+    return {
+      topics,
+      sentiment,
+      confidence,
+      keywords
+    };
+  }, []);
+
+  // 2. Smarter summary generation
+  const generateSmartSummary = useCallback((text: string, context: string): string => {
+    const analysis = analyzeResponse(text, context);
+    
+    // If confidence is low, return the original text
+    if (analysis.confidence < 0.3) return text;
+    
+    // For higher confidence responses, create a more concise summary
+    if (analysis.topics.length > 0) {
+      return analysis.topics.join(', ');
     }
-  }, [t, messages.length]);
+    
+    // Fallback to keywords if no topics were identified
+    return analysis.keywords.join(', ');
+  }, [analyzeResponse]);
+
+  // 3. Career suggestion helper
+  const suggestCareers = useCallback((passions: string[], talents: string[], worldNeeds: string[], monetization: string[]): string[] => {
+    // Career categories with associated keywords
+    const careerCategories: {[key: string]: string[]} = {
+      'enseignement/education': ['enseigner', 'éducation', 'apprendre', 'teaching', 'education', 'learning', 'formation', 'trainer'],
+      'arts/creative': ['art', 'créatif', 'creative', 'design', 'écriture', 'writing', 'music', 'musique', 'dessin', 'drawing'],
+      'technology': ['tech', 'technologie', 'développement', 'programming', 'computer', 'ordinateur', 'software', 'logiciel', 'code'],
+      'healthcare': ['santé', 'health', 'soins', 'care', 'médical', 'medical', 'therapy', 'thérapie'],
+      'environment': ['environnement', 'environment', 'nature', 'durable', 'sustainable', 'écologie', 'ecology'],
+      'social_work': ['social', 'communauté', 'community', 'aide', 'help', 'service', 'soutien', 'support'],
+      'business': ['business', 'entreprise', 'entrepreneuriat', 'management', 'gestion', 'finance', 'marketing'],
+      'research': ['recherche', 'research', 'science', 'analysis', 'analyse', 'étude', 'study', 'exploration']
+    };
+    
+    // Score each career category based on keyword overlap
+    const categoryScores: {[key: string]: number} = {};
+    
+    Object.entries(careerCategories).forEach(([category, categoryKeywords]) => {
+      let score = 0;
+      
+      // Check for overlaps with user's passions, talents, etc.
+      categoryKeywords.forEach(keyword => {
+        passions.forEach(passion => {
+          if (passion.includes(keyword) || keyword.includes(passion)) score += 3;
+        });
+        
+        talents.forEach(talent => {
+          if (talent.includes(keyword) || keyword.includes(talent)) score += 3;
+        });
+        
+        worldNeeds.forEach(need => {
+          if (need.includes(keyword) || keyword.includes(need)) score += 2;
+        });
+        
+        monetization.forEach(job => {
+          if (job.includes(keyword) || keyword.includes(job)) score += 2;
+        });
+      });
+      
+      categoryScores[category] = score;
+    });
+    
+    // Map category scores to specific career suggestions
+    const careerSuggestions: {[key: string]: string[]} = {
+      'enseignement/education': ['professeur', 'formateur', 'coach éducatif', 'créateur de contenu pédagogique'],
+      'arts/creative': ['artiste indépendant', 'designer', 'rédacteur', 'directeur créatif'],
+      'technology': ['développeur', 'consultant tech', 'data scientist', 'designer UX'],
+      'healthcare': ['thérapeute', 'conseiller en bien-être', 'coach de santé', 'praticien holistique'],
+      'environment': ['consultant en développement durable', 'entrepreneur vert', 'expert en écologie'],
+      'social_work': ['travailleur social', 'conseiller', 'coordinateur de communauté', 'responsable ONG'],
+      'business': ['entrepreneur', 'consultant', 'coach professionnel', 'spécialiste en marketing'],
+      'research': ['chercheur', 'analyste', 'écrivain spécialisé', 'consultant expert']
+    };
+    
+    // Get top 3 categories by score
+    const topCategories = Object.entries(categoryScores)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .filter(([_, score]) => score > 0)
+      .map(([category]) => category);
+    
+    // Get career suggestions from top categories
+    let suggestions: string[] = [];
+    topCategories.forEach(category => {
+      const categorySuggestions = careerSuggestions[category];
+      if (categorySuggestions) {
+        suggestions = [...suggestions, ...categorySuggestions.slice(0, 2)]; // Take top 2 from each category
+      }
+    });
+    
+    return suggestions.slice(0, 4); // Return up to 4 suggestions
+  }, []);
 
   // Define callback functions to avoid ESLint warnings
   const handleChatbotSpeechStart = useCallback(() => {
@@ -160,7 +336,134 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     setIsBobSpeaking(false);
   }, [selectedLanguage]);
 
-  // Define chatBotSpeak first since other functions depend on it
+  // Helper functions with proper memoization
+  const isAffirmative = useCallback((resp: string): boolean => {
+    const lowerResp = resp.toLowerCase();
+    return lowerResp === 'oui' || lowerResp === 'yes' || 
+           lowerResp === t('options.yes', 'Oui').toLowerCase();
+  }, [t]);
+  
+  const isNegative = useCallback((resp: string): boolean => {
+    const lowerResp = resp.toLowerCase();
+    return lowerResp === 'non' || lowerResp === 'no' ||
+           lowerResp === t('options.no', 'Non').toLowerCase();
+  }, [t]);
+  
+  const isUncertain = useCallback((resp: string): boolean => {
+    const lowerResp = resp.toLowerCase();
+    return lowerResp.includes('sûr') || lowerResp.includes('sure') ||
+           lowerResp === t('options.notSure', 'Je ne suis pas sûr(e)').toLowerCase();
+  }, [t]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setUserLocalStorage(localStorage);
+      
+      // Create audio element for 11labs playback
+      audioRef.current = new Audio();
+      audioRef.current.onended = handleChatbotSpeechEnd;
+      audioRef.current.onplay = handleChatbotSpeechStart;
+      audioRef.current.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        handleChatbotSpeechEnd();
+      };
+      
+      // Load selected voice from localStorage if available
+      const savedVoice = localStorage.getItem('selectedVoice');
+      if (savedVoice) {
+        setSelectedVoice(savedVoice);
+        setIsUsingElevenLabs(savedVoice !== 'default');
+      }
+    }
+
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reset call when language changes
+  useEffect(() => {
+    endCall();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultIntroduction, selectedLanguage]);
+  
+  // Update localStorage when voice changes
+  useEffect(() => {
+    if (userLocalStorage) {
+      userLocalStorage.setItem('selectedVoice', selectedVoice);
+      setIsUsingElevenLabs(selectedVoice !== 'default');
+      console.log('Voice changed to:', selectedVoice, 'Using ElevenLabs:', selectedVoice !== 'default');
+    }
+  }, [selectedVoice, userLocalStorage]);
+
+  // Enhanced Ikigai summary generation - add suggestCareers to dependencies
+  const generateIkigaiSummary = useCallback(() => {
+    // Analyze all components for key themes
+    const passionAnalysis = analyzeResponse(passionsSummary, 'passions');
+    const talentAnalysis = analyzeResponse(talentsSummary, 'talents');
+    const worldNeedsAnalysis = analyzeResponse(worldNeedsSummary, 'world_needs');
+    const monetizationAnalysis = analyzeResponse(monetizationSummary, 'monetization');
+    
+    // Look for connections across all four areas
+    const allKeywords = [
+      ...passionAnalysis.keywords,
+      ...talentAnalysis.keywords,
+      ...worldNeedsAnalysis.keywords,
+      ...monetizationAnalysis.keywords
+    ];
+    
+    // Find frequency of keywords to identify common themes
+    const keywordFrequency: {[key: string]: number} = {};
+    allKeywords.forEach(word => {
+      keywordFrequency[word] = (keywordFrequency[word] || 0) + 1;
+    });
+    
+    // Get keywords that appear in multiple areas (potential Ikigai center)
+    const commonThemes = Object.entries(keywordFrequency)
+      .filter(([_, count]) => count >= 2)
+      .map(([word]) => word);
+    
+    let ikigaiCore = "";
+    if (commonThemes.length > 0) {
+      ikigaiCore = t('ikigai.coreThemes', 
+        "Le cœur de votre Ikigai semble tourner autour de {{themes}}. C'est là que vos différentes dimensions s'alignent le mieux.", 
+        { themes: commonThemes.join(', ') });
+    }
+    
+    // Generate specific career suggestions based on all four components
+    let careerSuggestions = "";
+    if (passionsSummary && talentsSummary && worldNeedsSummary && monetizationSummary) {
+      // Simple career matching logic
+      const possibleCareers = suggestCareers(passionAnalysis.keywords, talentAnalysis.keywords, 
+                                            worldNeedsAnalysis.keywords, monetizationAnalysis.keywords);
+      if (possibleCareers.length > 0) {
+        careerSuggestions = t('ikigai.careerSuggestions',
+          "Basé sur votre profil, vous pourriez explorer des voies professionnelles comme : {{careers}}.",
+          { careers: possibleCareers.join(', ') });
+      }
+    }
+    
+    const summary = `
+      ${t('ikigai.summaryPassions', 'Votre passion semble être', { passions: passionsSummary })}.
+      ${t('ikigai.summaryTalents', 'Vos talents incluent', { talents: talentsSummary })}.
+      ${t('ikigai.summaryWorldNeeds', 'Les besoins du monde qui vous touchent sont', { worldNeeds: worldNeedsSummary })}.
+      ${t('ikigai.summaryMonetization', 'Et vous pourriez potentiellement gagner votre vie en', { monetization: monetizationSummary })}.
+      
+      ${ikigaiCore}
+      
+      ${careerSuggestions}
+      
+      ${t('ikigai.summaryConclusion', "L'intersection de ces quatre domaines constitue votre Ikigai - votre raison d'être.")}
+    `;
+    
+    setIkigaiSummary(summary);
+    return summary;
+  }, [t, passionsSummary, talentsSummary, worldNeedsSummary, monetizationSummary, analyzeResponse, suggestCareers]);
+
   const chatBotSpeak = useCallback(async (message: string) => {
     if (isChatbotSpeaking.current || !isUserCalling.current) {
       return;
@@ -238,219 +541,14 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     }
   }, [t, selectedVoice, isUsingElevenLabs, selectedLanguage, handleChatbotSpeechStart, handleChatbotSpeechEnd]);
 
-  // Helper function to generate the Ikigai summary
-  const generateIkigaiSummary = useCallback(() => {
-    const summary = `
-      ${t('ikigai.summaryPassions', 'Votre passion semble être', { passions: passionsSummary })}.
-      ${t('ikigai.summaryTalents', 'Vos talents incluent', { talents: talentsSummary })}.
-      ${t('ikigai.summaryWorldNeeds', 'Les besoins du monde qui vous touchent sont', { worldNeeds: worldNeedsSummary })}.
-      ${t('ikigai.summaryMonetization', 'Et vous pourriez potentiellement gagner votre vie en', { monetization: monetizationSummary })}.
-      
-      ${t('ikigai.summaryConclusion', "L'intersection de ces quatre domaines constitue votre Ikigai - votre raison d'être.")}
-    `;
-    
-    setIkigaiSummary(summary);
-    return summary;
-  }, [t, passionsSummary, talentsSummary, worldNeedsSummary, monetizationSummary]);
-
-  // Helper functions with proper memoization
-  const isAffirmative = useCallback((resp: string): boolean => {
-    const lowerResp = resp.toLowerCase();
-    return lowerResp === 'oui' || lowerResp === 'yes' || 
-           lowerResp === t('options.yes', 'Oui').toLowerCase();
-  }, [t]);
-  
-  const isNegative = useCallback((resp: string): boolean => {
-    const lowerResp = resp.toLowerCase();
-    return lowerResp === 'non' || lowerResp === 'no' ||
-           lowerResp === t('options.no', 'Non').toLowerCase();
-  }, [t]);
-  
-  const isUncertain = useCallback((resp: string): boolean => {
-    const lowerResp = resp.toLowerCase();
-    return lowerResp.includes('sûr') || lowerResp.includes('sure') ||
-           lowerResp === t('options.notSure', 'Je ne suis pas sûr(e)').toLowerCase();
-  }, [t]);
-
-  // PDF generation function
-  const generatePdf = useCallback(() => {
-    const doc = new jsPDF();
-    
-    // Add a title with styling
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(23, 37, 84); // Indigo color
-    doc.setFontSize(24);
-    doc.text('Votre Ikigai', 105, 30, { align: 'center' });
-    
-    // Add a subtitle
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(12);
-    doc.setTextColor(75, 85, 99); // Gray color
-    doc.text('Votre raison d\'être personnelle', 105, 40, { align: 'center' });
-    
-    // Add the date
-    const today = new Date();
-    const options: Intl.DateTimeFormatOptions = { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    };
-    doc.setFontSize(10);
-    doc.text(`Généré le: ${today.toLocaleDateString(i18n.language, options)}`, 20, 50);
-    
-    // Add a divider line
-    doc.setDrawColor(59, 130, 246); // Blue color
-    doc.setLineWidth(0.5);
-    doc.line(20, 55, 190, 55);
-    
-    // Extract the different parts of the Ikigai summary for better formatting
-    const summaryLines = ikigaiSummary.split('\n').filter(line => line.trim() !== '');
-    
-    let yPosition = 65;
-    
-    // Set standard text style for content
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(12);
-    
-    summaryLines.forEach(line => {
-      const trimmedLine = line.trim();
-      
-      // Check if this is a section header
-      if (trimmedLine.includes('passion') || 
-          trimmedLine.includes('talents') || 
-          trimmedLine.includes('besoins du monde') || 
-          trimmedLine.includes('gagner votre vie')) {
-        
-        // Style section headers
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(37, 99, 235); // Blue color for headers
-        
-        // Add some spacing before headers (except for the first one)
-        if (yPosition > 65) {
-          yPosition += 5;
-        }
-      } else {
-        // Regular text
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(0, 0, 0);
-      }
-      
-      // Split lines that are too long
-      const splitLines = doc.splitTextToSize(trimmedLine, 170);
-      
-      // Add each line to the PDF
-      splitLines.forEach((splitLine: string) => {
-        // Check if we need to add a new page
-        if (yPosition > 270) {
-          doc.addPage();
-          yPosition = 20;
-        }
-        
-        doc.text(splitLine, 20, yPosition);
-        yPosition += 7; // Line spacing
-      });
-      
-      // Add extra space after paragraphs
-      yPosition += 3;
-    });
-    
-    // Add a footer
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139); // Slate color
-    const footerText = t('ikigai.pdfFooter', 'Généré par Cool Ikigai - Votre assistant pour trouver votre raison d\'être');
-    doc.text(footerText, 105, 280, { align: 'center' });
-    
-    // Download the PDF with a name based on date
-    const fileName = `ikigai-${today.getFullYear()}-${(today.getMonth()+1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}.pdf`;
-    doc.save(fileName);
-    
-    return fileName;
-  }, [ikigaiSummary, t, i18n.language]);
-
-  // Function to save PDF
-  const savePDF = useCallback(() => {
-    if (ikigaiSummary) {
-      const fileName = generatePdf();
-      
-      // Add a message confirming the download
-      const confirmationMessage = t('ikigai.pdfConfirmation', 'Votre résumé Ikigai a été téléchargé au format PDF.');
-      setMessages(prev => [
-        ...prev,
-        {
-          message: confirmationMessage,
-          sender: 'ChatGPT',
-        },
-      ]);
-      chatBotSpeak(confirmationMessage);
-      
-      return fileName;
-    } else {
-      const errorMessage = t('ikigai.noPdfData', 'Désolé, aucun résumé Ikigai n\'est disponible pour téléchargement.');
-      setMessages(prev => [
-        ...prev,
-        {
-          message: errorMessage,
-          sender: 'ChatGPT',
-        },
-      ]);
-      chatBotSpeak(errorMessage);
-      
-      return null;
-    }
-  }, [ikigaiSummary, generatePdf, t, chatBotSpeak]);
-
+  // SOLUTION 2: First useEffect to determine message and options based on current step
+  // This effect computes what should be shown but doesn't update UI state
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setUserLocalStorage(localStorage);
-      
-      // Create audio element for 11labs playback
-      audioRef.current = new Audio();
-      audioRef.current.onended = handleChatbotSpeechEnd;
-      audioRef.current.onplay = handleChatbotSpeechStart;
-      audioRef.current.onerror = (e) => {
-        console.error('Audio playback error:', e);
-        handleChatbotSpeechEnd();
-      };
-      
-      // Load selected voice from localStorage if available
-      const savedVoice = localStorage.getItem('selectedVoice');
-      if (savedVoice) {
-        setSelectedVoice(savedVoice);
-        setIsUsingElevenLabs(savedVoice !== 'default');
-      }
+    if (!isRunningIkigaiFlow) {
+      setCurrentMessage('');
+      setCurrentOptions([]);
+      return;
     }
-
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Reset call when language changes
-  useEffect(() => {
-    // Skip the first render to prevent initializing an immediate call end
-    if (!isInitialRender.current && messages.length > 0) {
-      endCall();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLanguage]);
-  
-  // Update localStorage when voice changes
-  useEffect(() => {
-    if (userLocalStorage) {
-      userLocalStorage.setItem('selectedVoice', selectedVoice);
-      setIsUsingElevenLabs(selectedVoice !== 'default');
-      console.log('Voice changed to:', selectedVoice, 'Using ElevenLabs:', selectedVoice !== 'default');
-    }
-  }, [selectedVoice, userLocalStorage]);
-
-  // Handle Ikigai conversation flow with guard against infinite updates
-  useEffect(() => {
-    if (!isRunningIkigaiFlow) return;
 
     let message = '';
     let options: string[] = [];
@@ -528,9 +626,6 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
             { summary: ikigaiSummary });
         }
         options = [t('options.yes', 'Oui'), t('options.no', 'Non')];
-        
-        // Set summaryShown to true when we reach this step
-        setSummaryShown(true);
         break;
         
       case ConversationStep.EMAIL_REQUEST:
@@ -557,32 +652,20 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
         } else {
           message = t('ikigai.conclusionMessage', 
             "Merci pour votre temps ! Je vous souhaite une belle exploration de votre Ikigai. À bientôt !");
-          // End ikigai flow
-          setIsRunningIkigaiFlow(false);
+          // End ikigai flow - will be handled in the second useEffect
         }
         break;
         
       case ConversationStep.CONCLUSION:
         message = t('ikigai.conclusionMessage', 
           "Merci pour votre temps ! Je vous souhaite une belle exploration de votre Ikigai. À bientôt !");
-        // End ikigai flow
-        setIsRunningIkigaiFlow(false);
+        // End ikigai flow - will be handled in the second useEffect
         break;
     }
 
-    // Update messages and speak only if there's a new message
-    if (message) {
-      // Check if this message is already the last one to prevent infinite updates
-      const lastMessage = messages[messages.length - 1];
-      if (!lastMessage || lastMessage.message !== message || lastMessage.sender !== 'ChatGPT') {
-        const updatedMessages = [...messages, { message, sender: 'ChatGPT' }];
-        setMessages(updatedMessages);
-        chatBotSpeak(message);
-      }
-    }
-
-    // Update options
-    setIkigaiOptions(options);
+    // Store the message and options in local state instead of updating UI
+    setCurrentMessage(message);
+    setCurrentOptions(options);
   }, [
     currentStep, 
     isRunningIkigaiFlow, 
@@ -593,15 +676,38 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     worldNeedsSummary, 
     monetizationSummary, 
     ikigaiSummary,
-    messages,
-    chatBotSpeak,
     generateIkigaiSummary,
     isAffirmative,
     isUncertain,
     ikigaiUserResponses
   ]);
 
-  // Process Ikigai user responses
+  // SOLUTION 2: Second useEffect to update UI based on computed message and options
+  useEffect(() => {
+    // Skip if no message to display
+    if (!currentMessage) return;
+    
+    // Update messages
+    setMessages(prev => [...prev, { message: currentMessage, sender: 'ChatGPT' }]);
+    
+    // Speak the message
+    chatBotSpeak(currentMessage);
+    
+    // Update options
+    setIkigaiOptions(currentOptions);
+    
+    // Handle conclusion step - end the Ikigai flow if needed
+    if (currentStep === ConversationStep.CONCLUSION) {
+      setTimeout(() => {
+        setIsRunningIkigaiFlow(false);
+      }, 1000);
+    }
+    
+    // Clear the current message to prevent repeated updates
+    setCurrentMessage('');
+  }, [currentMessage, currentOptions, chatBotSpeak, currentStep]);
+
+  // Enhanced Ikigai response processing
   const processIkigaiResponse = useCallback((response: string) => {
     // Save the response
     setIkigaiUserResponses(prev => [...prev, {step: currentStep, response}]);
@@ -648,23 +754,29 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
         break;
         
       case ConversationStep.PASSIONS:
+        // Analyze the response for better understanding
+        const passionAnalysis = analyzeResponse(response, 'passions');
+        
         if (response.toLowerCase() === 'je ne sais pas' || 
             response.toLowerCase() === 'i don\'t know' ||
-            response.toLowerCase() === 'i dont know') {
-          // Guide them with a more specific prompt
-          const promptMessage = t('ikigai.unknownPassions', "Pensez à un moment où vous étiez totalement absorbé(e) par une activité, sans voir le temps passer. Qu'étiez-vous en train de faire ?");
-          setMessages(prev => [
-            ...prev,
-            {
-              message: promptMessage,
-              sender: 'ChatGPT',
-            },
-          ]);
-          chatBotSpeak(promptMessage);
-          // Stay at the same step
-        } else if (response.length < 10) {
-          // Response may be too vague or short
-          const promptMessage = t('ikigai.morePassions', "Pouvez-vous m'en dire un peu plus ? Pensez aux activités qui vous procurent de la joie, même si elles semblent simples ou ordinaires.");
+            response.toLowerCase() === 'i dont know' ||
+            passionAnalysis.confidence < 0.2) {
+          // If confidence is very low or explicit "don't know", guide with a specific prompt
+          let promptMessage;
+          
+          // If response is very short, ask for more details
+          if (response.length < 10) {
+            promptMessage = t('ikigai.morePassions', "Pouvez-vous m'en dire un peu plus ? Pensez aux activités qui vous procurent de la joie, même si elles semblent simples ou ordinaires.");
+          } 
+          // If sentiment is negative, provide encouragement
+          else if (passionAnalysis.sentiment === 'negative') {
+            promptMessage = t('ikigai.passionsEncouragement', "Je comprends que ce n'est pas toujours facile d'identifier ses passions. Essayons autrement : qu'est-ce qui vous fait perdre la notion du temps quand vous le faites ?");
+          }
+          // Default prompt for unclear responses
+          else {
+            promptMessage = t('ikigai.unknownPassions', "Pensez à un moment où vous étiez totalement absorbé(e) par une activité, sans voir le temps passer. Qu'étiez-vous en train de faire ?");
+          }
+          
           setMessages(prev => [
             ...prev,
             {
@@ -675,8 +787,9 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
           chatBotSpeak(promptMessage);
           // Stay at the same step
         } else {
-          // Summarize the passions
-          setPassionsSummary(response);
+          // Generate a smart summary of passions
+          const smartSummary = generateSmartSummary(response, 'passions');
+          setPassionsSummary(smartSummary);
           setCurrentStep(ConversationStep.VALIDATE_PASSIONS);
         }
         break;
@@ -685,66 +798,171 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
         if (isAffirmative(response)) {
           setCurrentStep(ConversationStep.TALENTS);
         } else {
+          // If user disagrees with summary, ask for clarification
+          const clarificationMessage = t('ikigai.passionsClarification', "Je vous prie de m'excuser. Pourriez-vous préciser vos passions à nouveau, peut-être en donnant plus de détails ?");
+          setMessages(prev => [
+            ...prev,
+            {
+              message: clarificationMessage,
+              sender: 'ChatGPT',
+            },
+          ]);
+          chatBotSpeak(clarificationMessage);
           // Go back to passions question for clarification
           setCurrentStep(ConversationStep.PASSIONS);
         }
         break;
         
       case ConversationStep.TALENTS:
-        // Summarize the talents
-        setTalentsSummary(response);
-        setCurrentStep(ConversationStep.VALIDATE_TALENTS);
+        // Similar smart analysis for talents
+        const talentAnalysis = analyzeResponse(response, 'talents');
+        
+        if (response.toLowerCase().includes('je ne sais pas') || 
+            response.toLowerCase().includes('i don\'t know') ||
+            talentAnalysis.confidence < 0.2) {
+          // Guide with talent-specific prompts
+          let promptMessage;
+          
+          if (response.length < 15) {
+            promptMessage = t('ikigai.moreTalents', "Essayez de penser aux compliments que vous recevez souvent, ou aux tâches que les autres vous demandent d'accomplir parce que vous y excellez.");
+          } else if (talentAnalysis.sentiment === 'negative') {
+            promptMessage = t('ikigai.talentsEncouragement', "Nous avons tous des talents, même si nous ne les reconnaissons pas toujours. Que vous disent vos amis ou collègues que vous faites bien ?");
+          } else {
+            promptMessage = t('ikigai.talentsAlternative', "Si vous deviez aider quelqu'un, dans quel domaine seriez-vous le plus utile ? Qu'est-ce qui vous semble facile alors que d'autres trouvent cela difficile ?");
+          }
+          
+          setMessages(prev => [
+            ...prev,
+            {
+              message: promptMessage,
+              sender: 'ChatGPT',
+            },
+          ]);
+          chatBotSpeak(promptMessage);
+          // Stay at talents step
+        } else {
+          // Generate a smart summary using talent keywords
+          const smartTalentsSummary = generateSmartSummary(response, 'talents');
+          setTalentsSummary(smartTalentsSummary);
+          setCurrentStep(ConversationStep.VALIDATE_TALENTS);
+        }
         break;
         
       case ConversationStep.VALIDATE_TALENTS:
         if (isAffirmative(response)) {
+          // Check for connections between passions and talents
+          const passionKeywords = analyzeResponse(passionsSummary, 'passions').keywords;
+          const talentKeywords = analyzeResponse(talentsSummary, 'talents').keywords;
+          
+          const commonKeywords = passionKeywords.filter(word => 
+            talentKeywords.some(keyword => word.includes(keyword) || keyword.includes(word))
+          );
+          
+          // Fix TypeScript error by adding explicit type checking and default value
+          if (commonKeywords.length > 0) {
+            const transitionMessage = t(
+              'ikigai.passionTalentConnection', 
+              "Je remarque que vos passions et vos talents semblent alignés autour de {{common}}. C'est excellent! Maintenant, explorons comment cela pourrait répondre aux besoins du monde.", 
+              { common: commonKeywords.join(', ') }
+            );
+            
+            setMessages(prev => [
+              ...prev,
+              { message: transitionMessage || "", sender: 'ChatGPT' },
+            ]);
+            
+            chatBotSpeak(transitionMessage);
+          }
+          
           setCurrentStep(ConversationStep.WORLD_NEEDS);
         } else {
-          // Go back to talents question for clarification
           setCurrentStep(ConversationStep.TALENTS);
         }
         break;
         
       case ConversationStep.WORLD_NEEDS:
-        // Summarize the world needs
-        setWorldNeedsSummary(response);
-        setCurrentStep(ConversationStep.VALIDATE_WORLD_NEEDS);
+        const needsAnalysis = analyzeResponse(response, 'world_needs');
+        
+        if (response.toLowerCase().includes('je ne sais pas') || 
+            needsAnalysis.confidence < 0.2) {
+          let promptMessage = t('ikigai.worldNeedsPrompt', 
+            "Pensez aux informations qui vous touchent, ou aux causes qui vous tiennent à cœur. Quels problèmes dans le monde aimeriez-vous aider à résoudre ?");
+          
+          setMessages(prev => [
+            ...prev,
+            { message: promptMessage, sender: 'ChatGPT' },
+          ]);
+          chatBotSpeak(promptMessage);
+        } else {
+          const smartWorldNeedsSummary = generateSmartSummary(response, 'world_needs');
+          setWorldNeedsSummary(smartWorldNeedsSummary);
+          setCurrentStep(ConversationStep.VALIDATE_WORLD_NEEDS);
+        }
         break;
         
       case ConversationStep.VALIDATE_WORLD_NEEDS:
         if (isAffirmative(response)) {
           setCurrentStep(ConversationStep.MONETIZATION);
         } else {
-          // Go back to world needs question for clarification
           setCurrentStep(ConversationStep.WORLD_NEEDS);
         }
         break;
         
       case ConversationStep.MONETIZATION:
-        // Summarize the monetization possibilities
-        setMonetizationSummary(response);
-        setCurrentStep(ConversationStep.VALIDATE_MONETIZATION);
+        const monetizationAnalysis = analyzeResponse(response, 'monetization');
+        
+        if (response.toLowerCase().includes('je ne sais pas') || 
+            monetizationAnalysis.confidence < 0.2) {
+          // Try to suggest based on previously collected data
+          const passionAnalysis = analyzeResponse(passionsSummary, 'passions');
+          const talentAnalysis = analyzeResponse(talentsSummary, 'talents');
+          const needsAnalysis = analyzeResponse(worldNeedsSummary, 'world_needs');
+          
+          // Get career suggestions based on existing data
+          const suggestions = suggestCareers(
+            passionAnalysis.keywords, 
+            talentAnalysis.keywords,
+            needsAnalysis.keywords,
+            []
+          );
+          
+          let promptMessage;
+          if (suggestions.length > 0) {
+            promptMessage = t(
+              'ikigai.monetizationSuggestions',
+              "D'après ce que vous m'avez dit sur vos passions, talents et les besoins du monde, vous pourriez peut-être envisager des métiers comme : {{careers}}. Qu'en pensez-vous ? Y a-t-il d'autres possibilités qui vous viennent à l'esprit ?",
+              { careers: suggestions.join(', ') }
+            );
+          } else {
+            promptMessage = t(
+              'ikigai.monetizationPrompt',
+              "Pourriez-vous envisager des métiers qui combinent vos talents en {{talents}} et votre intérêt pour {{needs}} ?",
+              { talents: talentsSummary, needs: worldNeedsSummary }
+            );
+          }
+          
+          setMessages(prev => [
+            ...prev,
+            { message: promptMessage, sender: 'ChatGPT' },
+          ]);
+          chatBotSpeak(promptMessage);
+        } else {
+          const smartMonetizationSummary = generateSmartSummary(response, 'monetization');
+          setMonetizationSummary(smartMonetizationSummary);
+          setCurrentStep(ConversationStep.VALIDATE_MONETIZATION);
+        }
         break;
         
       case ConversationStep.VALIDATE_MONETIZATION:
         if (isAffirmative(response)) {
           setCurrentStep(ConversationStep.SUMMARY);
         } else {
-          // Go back to monetization question for clarification
           setCurrentStep(ConversationStep.MONETIZATION);
         }
         break;
         
       case ConversationStep.SUMMARY:
-        if (response.toLowerCase().includes('pdf')) {
-          // User mentioned PDF, trigger the download
-          savePDF();
-          setCurrentStep(ConversationStep.EMAIL_REQUEST);
-        } else if (isAffirmative(response)) {
-          setCurrentStep(ConversationStep.EMAIL_REQUEST);
-        } else {
-          setCurrentStep(ConversationStep.COACHING);
-        }
+        setCurrentStep(ConversationStep.EMAIL_REQUEST);
         break;
         
       case ConversationStep.EMAIL_REQUEST:
@@ -780,21 +998,16 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
       case ConversationStep.COACHING_CONFIRMATION:
         setCurrentStep(ConversationStep.CONCLUSION);
         break;
+        
+      case ConversationStep.CONCLUSION:
+        // End Ikigai flow - moved to the second useEffect to avoid conflicts
+        break;
     }
-  }, [currentStep, isAffirmative, isNegative, isUncertain, t, chatBotSpeak, savePDF]);
-
-  const resetConversation = useCallback(() => {
-    // Use the translation function inside to avoid dependencies
-    const defaultIntroduction = t('bob.introduction');
-    const defaultMessage = [
-      {
-        message: defaultIntroduction,
-        sender: 'ChatGPT',
-      },
-    ];
-    setMessages(defaultMessage);
-    setSummaryShown(false);
-  }, [t]);
+  }, [
+    currentStep, isAffirmative, isNegative, isUncertain, t, chatBotSpeak, 
+    analyzeResponse, generateSmartSummary, suggestCareers, passionsSummary, 
+    talentsSummary, worldNeedsSummary
+  ]);
 
   const handleSend = useCallback(async (message: string) => {
     if (!message) {
@@ -835,7 +1048,7 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     
     // Regular chat flow
     const chatGPTAnswer = await getChatGptAnswer(updatedMessages);
-    setMessages(prev => [
+    setMessages([
       ...updatedMessages,
       {
         message: chatGPTAnswer,
@@ -862,8 +1075,8 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     setIsCalling(isUserCalling.current);
 
     if (!SpeechRecognition.browserSupportsSpeechRecognition()) {
-      setMessages(prev => [
-        ...prev,
+      setMessages([
+        ...messages,
         {
           message: t('bob.browserNotSupportSpeechRecognitionMessage'),
           sender: 'ChatGPT',
@@ -880,11 +1093,13 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
       sender: 'assistant',
     };
 
-    setMessages(prev => [...prev, formattedMessage]);
-    chatBotSpeak(firstMessage);
-  }, [t, chatBotSpeak]);
+    const updatedMessages = [...messages, formattedMessage];
 
-  // Start Ikigai conversation flow
+    setMessages(updatedMessages);
+    chatBotSpeak(firstMessage);
+  }, [messages, t, chatBotSpeak]);
+
+  // Start Ikigai conversation flow with enhanced intelligence
   const startIkigaiFlow = useCallback(() => {
     // Reset Ikigai state
     setCurrentStep(ConversationStep.INTRODUCTION);
@@ -895,7 +1110,6 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     setIkigaiSummary('');
     setContactInfo('');
     setIkigaiUserResponses([]);
-    setSummaryShown(false);
     
     // Start call if not already active
     if (!isUserCalling.current) {
@@ -906,23 +1120,12 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     // Set flow as running
     setIsRunningIkigaiFlow(true);
     
-    // Use translated introduction message
-    const introMessage = t('ikigai.introMessage', 
-      "Bienvenue. Je suis Cool Ikigai. Je peux vous aider à améliorer votre rapport au travail et à vous aligner sur vos aspirations avec succès. Tout ceci grâce à l'Ikigai, un concept transformateur, originaire de l'île d'Okinawa, au Japon. Tout d'abord sachez que notre politique de confidentialité est très stricte. Nous détruisons toute donnée personnelle collectée au bout de 15 jours. Nous ne pratiquons aucun commerce autour de la data.");
-    
-    // Add message without triggering another update
-    setMessages(prev => [...prev, { message: introMessage, sender: 'ChatGPT' }]);
-    
-    // Wait briefly before starting to speak to avoid state update conflicts
-    setTimeout(() => {
-      chatBotSpeak(introMessage);
-      
-      // Set the next step after intro is spoken
-      setTimeout(() => {
-        setCurrentStep(ConversationStep.READY_CHECK);
-      }, 1000);
-    }, 100);
-  }, [t, chatBotSpeak]);
+    // The rest will be handled by the useEffects
+  }, []);
+
+  const resetConversation = useCallback(() => {
+    setMessages(defaultMessage);
+  }, [defaultMessage]);
 
   const updateCallHistory = useCallback(() => {
     if (userLocalStorage && messages.length > 1) {
@@ -954,7 +1157,6 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
     
     // Reset Ikigai flow
     setIsRunningIkigaiFlow(false);
-    setSummaryShown(false);
   }, [isUsingElevenLabs, resetConversation]);
 
   const endCall = useCallback(() => {
@@ -987,8 +1189,6 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
         ikigaiSummary,
         isProcessingIkigai: isProcessingIkigai,
         startIkigaiFlow,
-        summaryShown,
-        savePDF,
       }}
     >
       {children}
