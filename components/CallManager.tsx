@@ -38,6 +38,8 @@ interface CallContextType {
   ikigaiSummary: string;
   isProcessingIkigai: boolean;
   startIkigaiFlow: () => void;
+  setMessages: React.Dispatch<React.SetStateAction<MessageType[]>>;
+  resetConversation: () => void;
 }
 
 const CallContext = createContext<CallContextType | undefined>(undefined);
@@ -762,7 +764,7 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
             response.toLowerCase() === 'i dont know' ||
             passionAnalysis.confidence < 0.2) {
           // If confidence is very low or explicit "don't know", guide with a specific prompt
-          let promptMessage;
+          let promptMessage: string; // Added explicit type
           
           // If response is very short, ask for more details
           if (response.length < 10) {
@@ -821,7 +823,7 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
             response.toLowerCase().includes('i don\'t know') ||
             talentAnalysis.confidence < 0.2) {
           // Guide with talent-specific prompts
-          let promptMessage;
+          let promptMessage: string; // Added explicit type
           
           if (response.length < 15) {
             promptMessage = t('ikigai.moreTalents', "Essayez de penser aux compliments que vous recevez souvent, ou aux tâches que les autres vous demandent d'accomplir parce que vous y excellez.");
@@ -926,7 +928,7 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
             []
           );
           
-          let promptMessage;
+          let promptMessage: string; // Added explicit type
           if (suggestions.length > 0) {
             promptMessage = t(
               'ikigai.monetizationSuggestions',
@@ -1189,6 +1191,8 @@ const CallManager: React.FC<CallManagerProps> = ({ children }) => {
         ikigaiSummary,
         isProcessingIkigai: isProcessingIkigai,
         startIkigaiFlow,
+        setMessages,
+        resetConversation,
       }}
     >
       {children}

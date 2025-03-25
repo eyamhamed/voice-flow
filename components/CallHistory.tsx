@@ -7,7 +7,7 @@ import { Layout, Menu } from 'antd';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faAngleLeft, faClose, faPhone, faRobot, faUser } from '@fortawesome/free-solid-svg-icons';
 import styled from 'styled-components';
-import { MessageType } from './CallManager';
+import { MessageType } from './types'; // Updated import path
 
 const { Sider } = Layout;
 
@@ -57,11 +57,13 @@ export function CallHistory() {
   const [showHistoryLayout, setShowHistoryLayout] = useState(false); // to manage sider and history layout visibility on small screens
 
   useEffect(() => {
-    const useCallHistories: CallHistoryType[] = localStorage.getItem('callHistory')
-      ? JSON.parse(localStorage.getItem('callHistory') as string)
-      : [];
-    setCallHistories(useCallHistories);
-    setShowHistoryLayout(false);
+    if (typeof window !== 'undefined') {
+      const useCallHistories: CallHistoryType[] = localStorage.getItem('callHistory')
+        ? JSON.parse(localStorage.getItem('callHistory') as string)
+        : [];
+      setCallHistories(useCallHistories);
+      setShowHistoryLayout(false);
+    }
   }, [open]);
 
   useEffect(() => {
@@ -93,9 +95,10 @@ export function CallHistory() {
 
   const noHistoryDom = (
     <div className="h-full flex justify-center items-center ">
-      {t('callHistory.modal.noHistoryMessage')}
+      {t('callHistory.modal.noHistoryMessage', 'No conversation history yet')}
     </div>
   );
+  
   return (
     <>
       <Button
@@ -103,7 +106,7 @@ export function CallHistory() {
         className="text-black hover:!text-black mr-3"
         onClick={() => setOpen(true)}
       >
-        <div className="xxs:hidden md:block">{t('callHistory')}</div>
+        <div className="xxs:hidden md:block">{t('callHistory', 'History')}</div>
         <div className="xxs:block md:hidden">
           <FontAwesomeIcon icon={faPhone} style={{ fontSize: '18px' }}></FontAwesomeIcon>
         </div>
@@ -119,11 +122,11 @@ export function CallHistory() {
                   onClick={handleBackClick}
                 ></FontAwesomeIcon>
               </div>
-              <div className="flex-1 flex justify-center">{t('callHistory.modal.title')}</div>
+              <div className="flex-1 flex justify-center">{t('callHistory.modal.title', 'Conversation History')}</div>
               <div className="flex-1">{''}</div>
             </div>
           ) : (
-            <div className="justify-center flex">{t('callHistory.modal.title')}</div>
+            <div className="justify-center flex">{t('callHistory.modal.title', 'Conversation History')}</div>
           )
         }
         centered
@@ -146,7 +149,7 @@ export function CallHistory() {
               items={items}
               onClick={item => handleSidebarClick(item.key)}
               selectedKeys={[selectedKey]}
-              className="!bg-gray-900  text-white"
+              className="!bg-gray-900 text-white"
               itemProp=""
             />
           </Sider>

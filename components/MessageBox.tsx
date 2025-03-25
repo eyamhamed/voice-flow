@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Loader2, MessageSquare, Volume2, Copy } from 'lucide-react';
 
 interface MessageBoxProps {
@@ -19,13 +19,13 @@ export default function MessageBox({
   const [currentTime, setCurrentTime] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // Extract message content if it's in an object format
-  const getMessageContent = (): string => {
+  // Extract message content if it's in an object format - using useCallback to memoize
+  const getMessageContent = useCallback((): string => {
     if (!message) return '';
     if (typeof message === 'string') return message;
     if (typeof message === 'object' && 'content' in message) return message.content;
     return '';
-  };
+  }, [message]);
   
   // Set current time only on client side to avoid hydration mismatch
   useEffect(() => {
@@ -69,7 +69,7 @@ export default function MessageBox({
     }, typingSpeed);
     
     return () => clearInterval(typingInterval);
-  }, [message]);
+  }, [getMessageContent]); // Fixed dependency array by using the memoized function
   
   // Auto-scroll as text is typed
   useEffect(() => {
@@ -111,7 +111,7 @@ export default function MessageBox({
       <div className="flex items-center mb-3">
         <div className={`flex items-center ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
           <MessageSquare className="h-4 w-4 mr-2" />
-          <span className="text-sm font-medium">VoiceFlow</span>
+          <span className="text-sm font-medium">Cool Ikigai</span>
         </div>
         
         <div className={`ml-auto transition-opacity duration-200 ${showActions ? 'opacity-100' : 'opacity-0'}`}>

@@ -4,10 +4,12 @@ import ConversionIdea from './ConversionIdea';
 import MessageBox from './MessageBox';
 import TalkButton from './TalkButton';
 import IkigaiOptionButtons from './IkigaiOptionButtons';
+import PdfButton from './PdfButton';
 import { useCallManager } from './CallManager';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, VolumeX, Volume2, ThumbsUp, ThumbsDown, Send } from 'lucide-react';
 import { useTranslation } from 'next-i18next';
+import { ConversationStep } from './types';
 
 export default function CallBob() {
   const {
@@ -23,6 +25,11 @@ export default function CallBob() {
     startIkigaiFlow,
     currentStep,
     ikigaiOptions,
+    ikigaiSummary,
+    passionsSummary,
+    talentsSummary,
+    worldNeedsSummary,
+    monetizationSummary,
   } = useCallManager();
 
   const { t } = useTranslation();
@@ -31,6 +38,20 @@ export default function CallBob() {
   const [feedback, setFeedback] = useState<null | 'positive' | 'negative'>(null);
   const [bobMood, setBobMood] = useState<'neutral' | 'happy' | 'thinking'>('neutral');
   const [userInput, setUserInput] = useState('');
+
+  // Check if Ikigai summary is ready to display the PDF button
+  const isIkigaiSummaryReady = ikigaiSummary && 
+                              passionsSummary && 
+                              talentsSummary && 
+                              worldNeedsSummary && 
+                              monetizationSummary && 
+                              (currentStep === ConversationStep.SUMMARY || 
+                               currentStep === ConversationStep.EMAIL_REQUEST ||
+                               currentStep === ConversationStep.CONTACT_ENTRY ||
+                               currentStep === ConversationStep.COACHING ||
+                               currentStep === ConversationStep.COACHING_SCHEDULE ||
+                               currentStep === ConversationStep.COACHING_CONFIRMATION ||
+                               currentStep === ConversationStep.CONCLUSION);
 
   // Update Bob's mood based on conversation state
   useEffect(() => {
@@ -177,6 +198,20 @@ export default function CallBob() {
                 className="w-full flex justify-center"
               >
                 <IkigaiOptionButtons />
+              </motion.div>
+            )}
+          </AnimatePresence>
+          
+          {/* PDF Download Button - show when Ikigai summary is ready */}
+          <AnimatePresence>
+            {isIkigaiSummaryReady && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="w-full flex justify-center"
+              >
+                <PdfButton />
               </motion.div>
             )}
           </AnimatePresence>

@@ -1,35 +1,234 @@
-// Create this as a new file: PdfButton.tsx
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useState } from 'react';
 import { useCallManager } from './CallManager';
 import { useTranslation } from 'next-i18next';
-import { FileDown } from 'lucide-react';
+import { DownloadCloud } from 'lucide-react';
+import jsPDF from 'jspdf';
+import { ConversationStep } from './types';
+import { motion } from 'framer-motion';
 
 interface PdfButtonProps {
   className?: string;
 }
 
 const PdfButton: React.FC<PdfButtonProps> = ({ className = '' }) => {
-  const { ikigaiSummary, savePDF } = useCallManager();
-  const { t } = useTranslation();
+  const { 
+    ikigaiSummary, 
+    messages, 
+    passionsSummary,
+    talentsSummary,
+    worldNeedsSummary,
+    monetizationSummary,
+    currentStep,
+    endCall
+  } = useCallManager();
   
-  // Only show the button if there's a summary available
-  if (!ikigaiSummary) return null;
+  const { t } = useTranslation();
+  const [isDownloading, setIsDownloading] = useState(false);
+  
+  // Only show the button when summary is ready (at SUMMARY or a later step)
+  // and all required Ikigai components are available
+  const isIkigaiSummaryReady = ikigaiSummary && 
+                              passionsSummary && 
+                              talentsSummary && 
+                              worldNeedsSummary && 
+                              monetizationSummary && 
+                              (currentStep === ConversationStep.SUMMARY || 
+                               currentStep === ConversationStep.EMAIL_REQUEST ||
+                               currentStep === ConversationStep.CONTACT_ENTRY ||
+                               currentStep === ConversationStep.COACHING ||
+                               currentStep === ConversationStep.COACHING_SCHEDULE ||
+                               currentStep === ConversationStep.COACHING_CONFIRMATION ||
+                               currentStep === ConversationStep.CONCLUSION);
+  
+  if (!isIkigaiSummaryReady) {
+    return null;
+  }
+  
+  const generatePDF = () => {
+    const doc = new jsPDF();
+    
+    // Setup PDF styling
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.setTextColor(33, 37, 41);
+    
+    // Add title
+    doc.text(t('ikigai.pdfTitle', 'Your Ikigai Summary'), 20, 20);
+    
+    // Add current date
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(12);
+    doc.setTextColor(108, 117, 125);
+    const date = new Date().toLocaleDateString();
+    doc.text(date, 20, 30);
+    
+    // Add main content
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(33, 37, 41);
+    
+    let y = 45; // Starting Y position for content
+    
+    // Add sections
+    if (passionsSummary) {
+      doc.text(t('ikigai.passionsSection', 'Your Passions'), 20, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(12);
+      y += 10;
+      doc.text(passionsSummary, 20, y, { 
+        maxWidth: 170,
+        lineHeightFactor: 1.5
+      });
+      y += calculateTextHeight(passionsSummary, 170) + 15;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+    }
+    
+    if (talentsSummary) {
+      doc.text(t('ikigai.talentsSection', 'Your Talents'), 20, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(12);
+      y += 10;
+      doc.text(talentsSummary, 20, y, { 
+        maxWidth: 170,
+        lineHeightFactor: 1.5
+      });
+      y += calculateTextHeight(talentsSummary, 170) + 15;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+    }
+    
+    if (worldNeedsSummary) {
+      doc.text(t('ikigai.worldNeedsSection', 'What the World Needs'), 20, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(12);
+      y += 10;
+      doc.text(worldNeedsSummary, 20, y, { 
+        maxWidth: 170,
+        lineHeightFactor: 1.5
+      });
+      y += calculateTextHeight(worldNeedsSummary, 170) + 15;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+    }
+    
+    if (monetizationSummary) {
+      doc.text(t('ikigai.monetizationSection', 'What You Can Be Paid For'), 20, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(12);
+      y += 10;
+      doc.text(monetizationSummary, 20, y, { 
+        maxWidth: 170,
+        lineHeightFactor: 1.5
+      });
+      y += calculateTextHeight(monetizationSummary, 170) + 15;
+    }
+    
+    // Check if we need a new page for the full summary
+    if (y > 250) {
+      doc.addPage();
+      y = 20;
+    }
+    
+    // Add Ikigai summary
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text(t('ikigai.summarySection', 'Your Ikigai'), 20, y);
+    y += 10;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(12);
+    
+    // Format the ikigai summary for PDF
+    const formattedSummary = ikigaiSummary
+      .replace(/\n\s*\n/g, '\n') // Remove excessive blank lines
+      .trim();
+    
+    doc.text(formattedSummary, 20, y, { 
+      maxWidth: 170,
+      lineHeightFactor: 1.5
+    });
+    
+    // Add footer
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(10);
+      doc.setTextColor(150, 150, 150);
+      doc.text(
+        t('ikigai.pdfFooter', 'Generated by Cool Ikigai'), 
+        doc.internal.pageSize.getWidth() / 2, 
+        doc.internal.pageSize.getHeight() - 10, 
+        { align: 'center' }
+      );
+    }
+    
+    // Save the PDF
+    doc.save('ikigai-summary.pdf');
+  };
+  
+  // Helper function to calculate text height
+  const calculateTextHeight = (text: string, maxWidth: number): number => {
+    // Rough estimation: assume 12pt font with 1.5 line height
+    // Each character is about 5pt wide on average, so maxWidth can fit maxWidth/5 characters per line
+    const charsPerLine = maxWidth / 5;
+    const lines = Math.ceil(text.length / charsPerLine);
+    return lines * 7; // Approximate height per line in points
+  };
+  
+  const handleDownload = () => {
+    setIsDownloading(true);
+    
+    try {
+      // Generate and download the PDF
+      generatePDF();
+      
+      // Add a concluding message about PDF download
+      const conclusionMessage = {
+        message: t('ikigai.pdfDownloaded', 'Your Ikigai summary has been downloaded. Thank you for exploring your Ikigai with us!'),
+        sender: 'ChatGPT'
+      };
+      
+      // End the call after a delay to ensure PDF has been generated
+      setTimeout(() => {
+        endCall();
+      }, 1500);
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+    } finally {
+      setTimeout(() => {
+        setIsDownloading(false);
+      }, 1000);
+    }
+  };
+  
+  // Button styles to match your IkigaiOptionButtons component
+  const buttonStyle = `
+    px-4 py-2 rounded-lg text-sm font-medium
+    transition-all duration-200 ease-in-out
+    focus:outline-none focus:ring-2 focus:ring-offset-2
+    disabled:opacity-50 disabled:cursor-not-allowed
+    flex items-center justify-center
+    bg-green-100 text-green-800 hover:bg-green-200 focus:ring-green-500
+    ${className}
+  `;
   
   return (
     <motion.button
-      onClick={savePDF}
-      className={`px-4 py-2 bg-green-600 text-white rounded-full flex items-center gap-2
-                hover:bg-green-700 active:bg-green-800 transition-colors duration-150
-                shadow-md ${className}`}
+      onClick={handleDownload}
+      disabled={isDownloading}
+      className={buttonStyle}
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.2 }}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
     >
-      <FileDown size={16} />
-      <span>{t('buttons.downloadPdf', 'Télécharger en PDF')}</span>
+      <DownloadCloud className="h-5 w-5 mr-2" />
+      <span>
+        {isDownloading
+          ? t('buttons.downloading', 'Downloading...')
+          : t('buttons.downloadPdf', 'Download Summary')}
+      </span>
     </motion.button>
   );
 };
